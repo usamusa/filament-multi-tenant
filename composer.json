@@ -1,0 +1,28 @@
+{
+    "name": "usamusa/filament-multi-tenant",
+    "description": "Shared Laravel Boost guidelines and agent skills for multi-tenant Filament apps: Filament 5, Livewire 4, stancl/tenancy 3, spatie/laravel-permission and Pest browser tests.",
+    "type": "library",
+    "license": "proprietary",
+    "keywords": [
+        "laravel",
+        "laravel-boost",
+        "filament",
+        "livewire",
+        "tenancy",
+        "ai-guidelines",
+        "agent-skills"
+    ],
+    "authors": [
+        {
+            "name": "usamusa"
+        }
+    ],
+    "require": {
+        "php": "^8.3"
+    },
+    "suggest": {
+        "laravel/boost": "^2.10 installs these guidelines and skills for every agent a project configures"
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
