@@ -97,6 +97,76 @@ function rowActionsOf(string $name): string
 
 The CSS classes (`fi-modal-open`, `fi-select-input-btn`, …) are Filament 5 internals. If a selector stops matching after a Filament upgrade, inspect the rendered HTML with `$page->debug()` and update the helper in one place.
 
+## Uploads
+
+They need the multipart handling in the base test case ([browser-test-case.md](browser-test-case.md)); without it every upload fails.
+
+```php
+/** A file on disk for a browser upload: a file input needs a path. */
+function uploadFixture(string $name, string $contents): string
+{
+    $directory = storage_path('framework/testing/uploads/'.Str::random(8));
+    mkdir($directory, recursive: true);
+    file_put_contents($path = $directory.'/'.$name, $contents);
+
+    return $path;
+}
+
+/**
+ * The file input of a Filament upload field, by the field's label. An upload
+ * field's label is no <label> element, so the field is matched by its text.
+ */
+function uploadField(string $label): string
+{
+    return '.fi-fo-field:has-text("'.$label.'") input[type="file"]';
+}
+
+/**
+ * Waits until a JavaScript expression on the page is true, for states no text
+ * announces (a finished upload, a loaded image).
+ */
+function waitUntil(mixed $page, string $expression, int $timeoutMs = 15_000): mixed
+{
+    $description = json_encode($expression, JSON_THROW_ON_ERROR);
+
+    $page->script(<<<JS
+        new Promise((resolve, reject) => {
+            const started = Date.now();
+            (function check() {
+                let done = false;
+                try { done = Boolean({$expression}); } catch (error) {}
+                if (done) { resolve(true); return; }
+                if (Date.now() - started > {$timeoutMs}) { reject(new Error('Timed out waiting for ' + {$description})); return; }
+                setTimeout(check, 100);
+            })();
+        })
+    JS);
+
+    return $page;
+}
+
+/** Waits until FilePond has sent every file of the page's upload fields to the server. */
+function waitForUploads(mixed $page): mixed
+{
+    return waitUntil($page, "[...document.querySelectorAll('.filepond--item')].length > 0 && [...document.querySelectorAll('.filepond--item')].every((item) => ['processing-complete', 'idle'].includes(item.dataset.filepondItemState))");
+}
+```
+
+```php
+$page = visit(tenantUrl($tenant, '/reports/create'))
+    ->fill(field('title'), 'Monthly report')
+    ->attach(uploadField('Attachments'), uploadFixture('report.pdf', "%PDF-1.4\n%%EOF\n"));
+
+waitForUploads($page)            // a save during the upload goes out without the file
+    ->click(formSubmit())
+    ->assertSee('Created');
+
+// An image in the page: wait until it has actually loaded.
+waitUntil($page, "(() => { const img = document.querySelector('.fi-in-entry img'); return img && img.complete && img.naturalWidth > 0; })()");
+```
+
+Keep fixtures small: a few bytes of a real format are enough for the type checks (a one-pixel PNG, a minimal PDF).
+
 Reading a Filament notification in a feature test: Livewire's dehydrate moves notifications to the session's `filament.claimed_notifications` key, and `assertNotified()` compares the title only.
 
 ```php

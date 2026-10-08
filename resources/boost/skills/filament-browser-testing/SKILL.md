@@ -1,6 +1,6 @@
 ---
 name: filament-browser-testing
-description: "Writes Pest 5 browser tests (pest-plugin-browser, Playwright/Chromium) for Filament 5 panels, including multi-tenant apps on tenant subdomains and WebAuthn/passkey flows. Use when adding or fixing a test in tests/Browser, setting up browser testing in a project, choosing selectors for Filament forms, modals, searchable selects and table row actions, or debugging browser tests that leak sessions or tenants between requests, miss Livewire redirects or time out."
+description: "Writes Pest 5 browser tests (pest-plugin-browser, Playwright/Chromium) for Filament 5 panels, including multi-tenant apps on tenant subdomains and WebAuthn/passkey flows. Use when adding or fixing a test in tests/Browser, setting up browser testing in a project, choosing selectors for Filament forms, modals, searchable selects, file uploads and table row actions, or debugging browser tests that leak sessions or tenants between requests, lose uploaded files, miss Livewire redirects or time out."
 metadata:
   author: usamusa
 ---
@@ -24,7 +24,7 @@ pest()->browser()->timeout(15_000);
 ```
 
 3. A base test case that makes the shared application behave like one fresh process per request: [references/browser-test-case.md](references/browser-test-case.md).
-4. Selector and sign-in helpers: [references/helpers.md](references/helpers.md).
+4. Selector, sign-in and upload helpers: [references/helpers.md](references/helpers.md).
 
 ## Writing a test
 
@@ -64,6 +64,7 @@ it('saves a manager\'s correction of a colleague\'s time entry', function () {
 - **Time travel**: never travel into the past in a browser test; the browser drops session cookies that expired in the travelled past. Create data with explicit timestamps instead.
 - **Tenant hosts**: Chromium resolves every `*.localhost` to loopback, so tenants are `http://<subdomain>.localhost:<port>`. The panel's domain pattern is fixed when the panel registers, so the base domain must be `localhost` before providers boot. `withHost()` is the alternative for a single host.
 - **Selectors**: Filament field ids contain dots (`form.email`), which CSS reads as classes; use attribute selectors. Searchable selects are a button plus an option list, not a native `<select>`. Modal fields are `mountedActionSchema0.<name>`.
+- **Uploads**: the in-process server passes the raw multipart body but no files, so without the parsing in the base test case every upload fails (Livewire reports `Undefined array key 0`, or validation says the file failed to upload). Attach to the field's file input (`uploadField()`; an upload field's label is no `<label>` element), then wait until FilePond has sent every file (`waitForUploads()`) before saving: a save during an upload goes out without the file.
 - **Server-side rendering**: raise the timeout above the 5-second default; the first paint of a panel page is slow.
 - **Debugging**: `./vendor/bin/pest --debug` (headed, pauses on failure), `$page->screenshot()`, `--trace` for flaky tests.
 
