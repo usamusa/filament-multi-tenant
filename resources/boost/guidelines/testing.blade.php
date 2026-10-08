@@ -17,6 +17,7 @@
 - Never travel back in time in a browser test: the browser drops session cookies that expired in the travelled past.
 - Reach tenants as `http://<subdomain>.localhost:<port>` (Chromium resolves every `*.localhost` to loopback) and set the tenant base domain to `localhost` before service providers boot.
 - Select Filament fields by id: `[id="form.email"]`, `[id="mountedActionSchema0.name"]`. A dotted name is otherwise parsed as CSS. Searchable selects are a button plus an option list, not a native select.
+- The in-process server hands the app a multipart request's raw body but none of its files (an open TODO in pest-plugin-browser), so every Livewire or Filament upload arrives empty and fails. Parse multipart bodies in the base test case into `Illuminate\Http\UploadedFile` objects created with `test: true` (a Symfony `UploadedFile` is rebuilt without its test flag, and validation then rejects a file PHP didn't upload), and create Livewire's test upload disk in `setUp()` with `FileUploadConfiguration::storage()`. Code and upload helpers: `filament-browser-testing` skill.
 - Filament renders on the server for every round trip; raise the browser timeout above the 5-second default.
 - Run WebAuthn/passkey flows with a software authenticator so the server verifies real signatures; never stub the verification.
 @endscoped
