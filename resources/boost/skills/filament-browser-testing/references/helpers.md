@@ -115,10 +115,14 @@ function uploadFixture(string $name, string $contents): string
 /**
  * The file input of a Filament upload field, by the field's label. An upload
  * field's label is no <label> element, so the field is matched by its text.
+ * It is FilePond's own input, which exists only once the field has started:
+ * a file attached to the field's original input before then lands on an
+ * element FilePond replaces, and the upload never begins. Playwright waits
+ * for this one to appear.
  */
 function uploadField(string $label): string
 {
-    return '.fi-fo-field:has-text("'.$label.'") input[type="file"]';
+    return '.fi-fo-field:has-text("'.$label.'") input.filepond--browser';
 }
 
 /**
@@ -160,6 +164,12 @@ $page = visit(tenantUrl($tenant, '/reports/create'))
 waitForUploads($page)            // a save during the upload goes out without the file
     ->click(formSubmit())
     ->assertSee('Created');
+
+// An upload field in a modal (the rich editor's "Attach files", an action's
+// form) starts when the modal opens: attach to its FilePond input too.
+$page->click('[aria-label="Attach files"]')
+    ->attach('.fi-modal-open input.filepond--browser', uploadFixture('photo.png', $png));
+waitForUploads($page)->click(modalSubmit());
 
 // An image in the page: wait until it has actually loaded.
 waitUntil($page, "(() => { const img = document.querySelector('.fi-in-entry img'); return img && img.complete && img.naturalWidth > 0; })()");
