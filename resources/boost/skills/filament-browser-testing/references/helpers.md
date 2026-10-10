@@ -93,6 +93,46 @@ function rowActionsOf(string $name): string
 {
     return 'tr:has-text("'.$name.'") [aria-label="Actions"]';
 }
+
+/**
+ * A field of a Builder block, by the block's position (1 = the first block)
+ * and the field's name. `nth=` counts only the blocks; `:nth-child()` would
+ * also count the controls for inserting a block in between. Playwright waits
+ * until a newly added block exists, so fill right after adding it.
+ */
+function builderField(int $position, string $field): string
+{
+    return '.fi-fo-builder-item >> nth='.($position - 1).' >> [id$=".data.'.$field.'"]';
+}
+
+/**
+ * Answers the browser's own confirm dialogs (wire:confirm) with OK for the
+ * rest of the page's life. Playwright dismisses dialogs nobody handles, so
+ * the confirmed action would never run.
+ */
+function confirmDialogs(mixed $page): mixed
+{
+    $page->script('void (window.confirm = () => true)');
+
+    return $page;
+}
+```
+
+```php
+// A Builder: add blocks, then fill them by position.
+$page->click('Add step')
+    ->click('.fi-dropdown-list-item:visible:has-text("Measurement")')
+    ->fill(builderField(1, 'label'), 'Fridge temperature')
+    ->click('Add step')
+    ->click('.fi-dropdown-list-item:visible:has-text("Check")')
+    ->fill(builderField(2, 'label'), 'Door closes');
+
+// A button with wire:confirm.
+confirmDialogs($page)->click('Restore the template')->assertSee('Restored');
+
+// Phone width: nothing may scroll sideways.
+$page->resize(390, 844);
+expect($page->script('document.documentElement.scrollWidth <= window.innerWidth'))->toBeTrue();
 ```
 
 The CSS classes (`fi-modal-open`, `fi-select-input-btn`, …) are Filament 5 internals. If a selector stops matching after a Filament upgrade, inspect the rendered HTML with `$page->debug()` and update the helper in one place.
