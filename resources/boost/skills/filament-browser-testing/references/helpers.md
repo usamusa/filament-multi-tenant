@@ -76,7 +76,13 @@ function modalSubmit(): string
     return '.fi-modal-open .fi-modal-footer-actions > .fi-btn.fi-color';
 }
 
-/** The button that opens a searchable select (no native <select>), by the field's label. */
+/**
+ * The button that opens a searchable select (no native <select>), by the
+ * field's label. Not inside a Builder or Repeater: the builder is a field
+ * itself, so its wrapper matches the label too and every select nested in it
+ * comes along. Click a nested select's button by its id instead, e.g.
+ * `.fi-select-input-btn[id*=".conditions."][id$=".field"]`.
+ */
 function searchableSelect(string $label): string
 {
     return '.fi-fo-field:has(label:has-text("'.$label.'")) .fi-select-input-btn';
@@ -97,8 +103,13 @@ function rowActionsOf(string $name): string
 /**
  * A field of a Builder block, by the block's position (1 = the first block)
  * and the field's name. `nth=` counts only the blocks; `:nth-child()` would
- * also count the controls for inserting a block in between. Playwright waits
- * until a newly added block exists, so fill right after adding it.
+ * also count the controls for inserting a block in between. Nested blocks
+ * count too, in page order. Playwright waits until a block exists at that
+ * position, so fill right after appending one at the end. A block inserted
+ * before others, or into a nested builder, takes a position that already
+ * exists: Playwright finds the old block there at once and fills the wrong
+ * field. Select such a block's fields by an id pattern instead, which
+ * Playwright waits for, e.g. `[id*=".data.items."][id$=".data.label"]`.
  */
 function builderField(int $position, string $field): string
 {
@@ -126,6 +137,16 @@ $page->click('Add step')
     ->click('Add step')
     ->click('.fi-dropdown-list-item:visible:has-text("Check")')
     ->fill(builderField(2, 'label'), 'Door closes');
+
+// Nested builders: the inner builder's add button inside its block (only the
+// visible ones; collapsed sections keep theirs hidden), a block label matched
+// exactly when another label contains it ("Task" and "Task without waiting"),
+// the inserted block's field by an id pattern, a nested select by its id.
+$page->click('.fi-fo-builder-item >> nth=0 >> button:visible:has-text("Add item")')
+    ->click('.fi-dropdown-list-item:visible >> text="Task"')
+    ->fill('[id*=".data.items."][id$=".data.title"]', 'Check the door')
+    ->click('.fi-select-input-btn[id*=".conditions."][id$=".field"]')
+    ->click(selectOption('Door closes'));
 
 // A button with wire:confirm.
 confirmDialogs($page)->click('Restore the template')->assertSee('Restored');
