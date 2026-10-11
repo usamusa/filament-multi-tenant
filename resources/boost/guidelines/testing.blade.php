@@ -10,6 +10,15 @@
 - Pest loads every test file into one process. Two files declaring a global helper function of the same name each pass alone and break the whole suite with a fatal redeclaration error. Give file-local helpers distinctive names and keep shared ones in `tests/Pest.php`; `grep -rhoE "^function \w+" tests | sort | uniq -d` lists clashes.
 - `expect($object)->value` is the expectation's own `value` property (the object itself), not the object's `value`. Write `expect($object->value)`.
 @endif
+@if($assist->hasPackage('livewire/livewire', '^4.0'))
+
+@scoped(['tests/**'])
+## Livewire tests
+
+- A component under `Livewire::test()` runs `assertSee()`, `assertDontSee()`, `assertSeeText()`, `assertDontSeeText()`, `assertSeeHtml()`, `assertDontSeeHtml()` and `assertSeeHtmlInOrder()` against its current HTML. Every other response assertion, `assertSeeInOrder()` and `assertSeeTextInOrder()` among them, goes to the last HTTP response: it passes on the first render and fails after `set()` or `call()`, whose response is the update's JSON (escaped markup such as `<\/p>` and `\u00fc`, plus the snapshot). Check order with `assertSeeHtmlInOrder()` (texts through `e()`) or in `$component->html()`.
+- `Livewire::withQueryParams()`, `withCookies()` and `withHeaders()` stay set for every later `Livewire::test()` in the same test. Call `withQueryParams()` before each `test()`, with an empty array where none apply, or a later component starts with the earlier ones.
+@endscoped
+@endif
 @if($assist->hasPackage('filament/filament', '^5.0'))
 
 @scoped(['tests/**'])
@@ -30,7 +39,7 @@
 - Reach tenants as `http://<subdomain>.localhost:<port>` (Chromium resolves every `*.localhost` to loopback) and set the tenant base domain to `localhost` before service providers boot.
 - Select Filament fields by id: `[id="form.email"]`, `[id="mountedActionSchema0.name"]`. A dotted name is otherwise parsed as CSS. Searchable selects are a button plus an option list, not a native select.
 - A Builder or Repeater is a field itself, wrapping its items' fields: a selector by label such as `.fi-fo-field:has(label:has-text("…"))` also matches the builder around the field, and so every field nested in it. Select nested fields by id (`[id*=".conditions."][id$=".field"]`). `nth=` waits only for a position that doesn't exist yet: a block inserted before others, or into a nested builder, is found at once at the old block's position, so select it by an id pattern too (`filament-browser-testing` skill).
-- `click()`, `fill()` and the other element methods take a string that starts with `#`, `.` or `[`, or contains one of `: ( ) , = > + ~ * | ^`, or a dot before a letter ("z.B."), as a CSS selector, and anything else as visible text. Click such a text through Playwright's text engine, quoted for an exact match: `text="Temperature: 9.5 °C"`. Unquoted, it also matches every longer text containing it, and strict mode fails on two matches. `assertSee()` always searches text.
+- `click()`, `fill()` and the other element methods take a string that starts with `#`, `.` or `[`, or contains one of `: ( ) , = > + ~ * | ^`, or a dot before a letter ("z.B."), as a CSS selector, and anything else as visible text. Click such a text through Playwright's text engine, quoted for an exact match: `text="Temperature: 9.5 °C"`. Unquoted, it also matches every longer text containing it, and strict mode fails on two matches. `assertSee()` always searches text. A bare tag name is text too: `keys('body', …)` waits for an element showing "body"; press page-wide keys on an element found by class or id (`.fi-body` in a Filament panel).
 - Playwright dismisses the browser's own dialogs, so a button with a confirm dialog (Livewire's `wire:confirm`) silently does nothing. Set `window.confirm` to answer true before the click (`filament-browser-testing` skill).
 - The in-process server hands the app a multipart request's raw body but none of its files (an open TODO in pest-plugin-browser), so every Livewire or Filament upload arrives empty and fails. Parse multipart bodies in the base test case into `Illuminate\Http\UploadedFile` objects created with `test: true` (a Symfony `UploadedFile` is rebuilt without its test flag, and validation then rejects a file PHP didn't upload), and create Livewire's test upload disk in `setUp()` with `FileUploadConfiguration::storage()`. Code and upload helpers: `filament-browser-testing` skill.
 - Filament renders on the server for every round trip; raise the browser timeout above the 5-second default.
