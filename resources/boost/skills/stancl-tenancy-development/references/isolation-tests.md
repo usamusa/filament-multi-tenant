@@ -1,6 +1,14 @@
 # Tenancy isolation tests
 
-Required whenever a change touches bootstrappers, connections, database grants, caches or anything stateful. Each test creates real tenants (real databases), so clean up explicitly: `RefreshDatabase` rolls back only the central transaction.
+Required whenever a change touches identification, bootstrappers, connections, database grants, caches, sessions, storage or anything stateful. These tests create real tenants with real databases.
+
+## Traps in tests
+
+- **`Event::fake()` without a list** swallows `TenancyInitialized` and the other tenancy events: tenancy never bootstraps and queries silently hit the central database. Fake only what the test asserts: `Event::fake([OrderShipped::class])`.
+- **`Queue::fake()` / `Bus::fake()`** skip stancl's payload hook, so faked jobs carry no `tenant_id`. Assert that a job was dispatched with the fakes; test the tenant round trip with a real database queue (below).
+- **`RefreshDatabase`** wraps the central connection in a transaction. Tenant databases are created and dropped for real and survive the rollback: delete the tenants after each test. In-memory SQLite can't hold the tenant databases.
+- **Leaked context.** A failing assertion inside `$tenant->run()` skips the restore, and the next test starts inside that tenant. End tenancy in `afterEach`.
+- **Open connections block `DROP DATABASE`.** Purge every extra connection you opened to a tenant database before deleting the tenant.
 
 ## Helpers and cleanup
 
@@ -32,11 +40,12 @@ afterEach(function () {
     if (tenancy()->initialized) {
         tenancy()->end();
     }
-    // Purge any extra connections the test opened to tenant databases first,
-    // or DROP DATABASE is blocked by the open session.
+    // Purge any extra connections the test opened to tenant databases first.
     deleteAllTenants();
 });
 ```
+
+For tests that run entirely inside one tenant, a base class or a `beforeEach` that creates a tenant and calls `tenancy()->initialize($tenant)` keeps the test bodies plain.
 
 ## The permission cache does not leak within one process
 
@@ -169,9 +178,50 @@ it('runs the queued job inside the tenant that dispatched it', function () {
 });
 ```
 
+## Routes stay on their plane
+
+```php
+it('answers 404 for a tenant route on the central domain', function () {
+    $this->get('http://'.config('tenancy.central_domains')[0].'/dashboard')->assertNotFound();
+});
+
+it('does not serve the central admin panel on a tenant host', function () {
+    makeTenant('acme');
+
+    $this->get('http://acme.'.config('app.tenant_base_domain').'/admin/login')->assertNotFound();
+});
+```
+
+## Storage and sessions are per tenant
+
+```php
+it('keeps one tenant\'s files out of another tenant\'s disk', function () {
+    $alpha = makeTenant('alpha');
+    $bravo = makeTenant('bravo');
+
+    $alpha->run(fn () => Storage::disk('local')->put('probe.txt', 'alpha'));
+
+    expect($bravo->run(fn () => Storage::disk('local')->exists('probe.txt')))->toBeFalse()
+        ->and(Storage::disk('local')->exists('probe.txt'))->toBeFalse();
+
+    // Tenant storage is real and survives the tenant: clean up.
+    $alpha->run(fn () => Storage::disk('local')->delete('probe.txt'));
+});
+```
+
+If sessions are not stored in the tenant database, prove that a session cookie from tenant A doesn't authenticate at tenant B: sign in at A, replay its cookie against B, and expect a guest (or a 403 from `ScopeSessions`).
+
+## Cached lookup is invalidated
+
+With `DomainTenantResolver::$shouldCache` on: resolve a tenant, rename or delete its domain (or suspend the tenant), and assert the next request sees the change. Run the update once in central and once in tenant context, which catches a resolver cache that lives under a tenant prefix.
+
+## Links in queued mail point at the tenant
+
+Send the notification through a real (or `sync`) queue from tenant context and assert the link's host is the tenant's domain, not `app.url`.
+
 ## A tenant's database role cannot reach another tenant (PostgreSQL)
 
-Postgres words errors in the server's locale, and pdo_pgsql reports every failed connection as SQLSTATE `08006`, so assert the catalog and the code, not the message.
+PostgreSQL words errors in the server's locale, and pdo_pgsql reports every failed connection as SQLSTATE `08006`, so assert the catalog and the code, not the message.
 
 ```php
 it('denies tenant role A any connection to tenant B\'s database', function () {
@@ -201,7 +251,7 @@ it('denies tenant role A any connection to tenant B\'s database', function () {
 });
 ```
 
-A permission denial inside a database (for example UPDATE on an append-only table) is SQLSTATE `42501`.
+A permission denial inside a database (for example an `UPDATE` on an append-only table) is SQLSTATE `42501`.
 
 ## Test databases on a shared server
 
@@ -230,3 +280,7 @@ protected function setUp(): void
 ```
 
 Have the suite refuse database names that don't look like test databases before it creates or drops anything, and drop what it created when the owning process exits (in a parallel run, the main process).
+
+## Browser tests
+
+Uploads, sign-in, panels and passkey ceremonies on tenant hosts need browser tests: see the `filament-browser-testing` skill.

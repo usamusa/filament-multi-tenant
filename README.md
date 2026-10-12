@@ -20,7 +20,7 @@ It is a Composer package without runtime code. [Laravel Boost](https://github.co
 
 | Skill | Use it for |
 | --- | --- |
-| `stancl-tenancy-development` | Setting up or auditing tenancy: checklist, bootstrapper code, request plumbing, isolation tests, symptom table |
+| `stancl-tenancy-development` | Everything stancl/tenancy 3 (checked against 3.10): a hub with the mental model, setup checklist and symptom table, plus topic files on identification and routing, the tenant lifecycle, databases and commands, bootstrappers, sessions and queues, Livewire/Filament request plumbing, integrations (spatie, Sanctum, Passport, Telescope, Vite, Horizon), impersonation and resource syncing, and isolation tests |
 | `filament-panel-authorization` | Permission-gated resources, record rules, guards for critical actions, the per-role button invariant test |
 | `filament-browser-testing` | Browser tests for Filament panels on tenant subdomains, selectors, passkey ceremonies with a software authenticator |
 | `record-stack-rule` | Adding or changing a rule in this package |

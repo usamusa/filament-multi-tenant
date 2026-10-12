@@ -1,31 +1,67 @@
-# Bootstrappers and central pins
+# Bootstrappers
 
-## Registration
+A bootstrapper implements `Stancl\Tenancy\Contracts\TenancyBootstrapper` (`bootstrap(Tenant $tenant)` and `revert()`). The package registers every class in `tenancy.bootstrappers` as a **singleton**, runs `bootstrap()` in config order when tenancy starts, and runs `revert()` **in the same order** when it ends. Write each `revert()` so it doesn't depend on another bootstrapper having reverted first.
 
-`config/tenancy.php`:
+## The built-in bootstrappers
+
+### DatabaseTenancyBootstrapper
+
+Builds the `tenant` connection from the tenant's database config, makes it the default, and switches back to `tenancy.database.central_connection` on revert. Explicit connections (`DB::connection('x')`, a model's `getConnectionName()`, the `CentralConnection` trait) are untouched. See [databases-migrations](databases-migrations.md).
+
+### CacheTenancyBootstrapper
+
+Replaces the `cache` binding with a manager that tags every call with `tenant_base` + tenant key. It needs a store with tags (Redis, Memcached); on the database, file or array store each tenant-context call throws "This cache store does not support tagging". Tags allow `php artisan cache:clear --tags=tenant<key>`. `global_cache()` returns an untagged manager for central entries.
+
+For stores without tags, use the prefix bootstrapper below instead.
+
+### FilesystemTenancyBootstrapper
+
+- **`storage_path()`** becomes `storage/<suffix_base><key>` (for example `storage/tenant42`) when `suffix_storage_path` is on. Paths Laravel resolved at boot (logs, compiled views, file sessions) keep the central path, but anything that calls `storage_path()` at runtime writes into the tenant folder: real-time facades (`storage/tenant42/framework/cache`), packages that keep keys or files under storage (Passport). Create the folders a tenant needs in the provisioning pipeline, or give those packages absolute paths at boot.
+- **Disks** listed in `tenancy.filesystem.disks` get a tenant root: the `root_override` entry with `%storage_path%` (the suffixed storage path) and `%tenant%` (the tenant key) replaced, or the original root plus `/<suffix>`. For S3 that means a key prefix: a bucket disk with root `files` becomes `files/tenant42`. A disk missing from the list is shared by every tenant.
+- **`asset()`** points at the tenant asset route (`/tenancy/assets/...`, served by `TenantAssetsController` from the tenant's `app/public`) or, when `ASSET_URL` is set, at that URL plus the suffix. That breaks every package that loads its JS and CSS through `asset()`, Filament and Livewire included. Set `asset_helper_tenancy` to `false`, use `tenant_asset()` for tenant files and `global_asset()` when you need the central URL explicitly.
+- `TenantAssetsController::$tenancyMiddleware` defaults to `InitializeTenancyByDomain`; set it to the identification middleware you use. `tenancy.routes` set to `false` removes the asset route (custom controller or external storage).
+
+### QueueTenancyBootstrapper
+
+Adds `tenant_id` to the payload of jobs dispatched in tenant context. The worker initializes that tenant before each job and, since 3.8.5, ends tenancy after every job. `QueueTenancyBootstrapper::$forceRefresh` is deprecated and does nothing. A queue connection with `'central' => true` in its config never gets a `tenant_id`. See [sessions-queues](sessions-queues.md).
+
+### RedisTenancyBootstrapper
+
+For direct `Redis::` calls: sets the phpredis `OPT_PREFIX` of each connection in `tenancy.redis.prefixed_connections` to `prefix_base` + tenant key (no separator). It needs phpredis; predis is not supported. Never prefix the connection your queues or Horizon use: the worker would no longer see the jobs.
+
+## Writing your own
 
 ```php
-'bootstrappers' => [
-    Stancl\Tenancy\Bootstrappers\DatabaseTenancyBootstrapper::class, // or your own (per-tenant roles)
-    App\Tenancy\Bootstrappers\CachePrefixBootstrapper::class,
-    App\Tenancy\Bootstrappers\PermissionCacheBootstrapper::class,
-    Stancl\Tenancy\Bootstrappers\FilesystemTenancyBootstrapper::class,
-    Stancl\Tenancy\Bootstrappers\QueueTenancyBootstrapper::class,
-],
+final class SearchIndexBootstrapper implements TenancyBootstrapper
+{
+    private ?string $originalIndex = null;
 
-'database' => [
-    'central_connection' => env('DB_CONNECTION', 'central'),
-    'prefix' => env('TENANT_DB_PREFIX', 'tenant_'),
-    'suffix' => env('TENANT_DB_SUFFIX', ''),
-    // ...
-],
+    public function bootstrap(Tenant $tenant): void
+    {
+        $this->originalIndex ??= config('scout.prefix');
+        config(['scout.prefix' => $this->originalIndex.'tenant_'.$tenant->getTenantKey().'_']);
+    }
+
+    public function revert(): void
+    {
+        if ($this->originalIndex === null) {
+            return;
+        }
+
+        config(['scout.prefix' => $this->originalIndex]);
+        $this->originalIndex = null;
+    }
+}
 ```
 
-stancl reverts bootstrappers in reverse order. A bootstrapper whose revert depends on another one's state must not assume it still holds; the cache bootstrapper below re-initializes spatie's registrar itself for that reason.
+- Register it in `tenancy.bootstrappers`. As a singleton it may keep the original values on itself.
+- Changing config is not enough for services that are already resolved. Forget the instance (`app()->forgetInstance(...)`, a facade's `clearResolvedInstances()`) so the next use rebuilds it.
+- A static `__constructStatic(Application $app)` method runs when the package registers its bootstrappers; the queue bootstrapper uses it to hook into the worker before any tenant exists.
+- Every bootstrapper needs a test that switches tenants within one process (see [isolation-tests](isolation-tests.md)).
 
 ## Cache isolated by key prefix
 
-Replaces stancl's tag-based `CacheTenancyBootstrapper`, which throws "This cache store does not support tagging" on the database and file stores. It works on any store (database in dev, Redis in production).
+Works on any store (database in dev, Redis in production) and replaces stancl's tag-based bootstrapper.
 
 ```php
 <?php
@@ -88,11 +124,14 @@ final class CachePrefixBootstrapper implements TenancyBootstrapper
 }
 ```
 
-Drop the `PermissionRegistrar` line if the app doesn't use spatie/laravel-permission.
+- Pin the `database` cache store to the central connection (`'connection' => env('DB_CACHE_CONNECTION', env('DB_CONNECTION', 'central'))`, the same for `lock_connection`), so no store binds to a tenant connection that tenancy is about to purge.
+- Laravel uses a store's own `prefix` key before the global `cache.prefix`. A store with an explicit `prefix` therefore stays central in every context: use one for central data read from tenant context and for cached tenant lookup (see [identification-routing](identification-routing.md)).
+- `global_cache()` builds a fresh manager from the current config, so with this bootstrapper it is **not** central inside a tenant. Use the fixed-prefix store or `tenancy()->central(fn () => Cache::get(...))` instead.
+- Drop the `PermissionRegistrar` line if the app doesn't use spatie/laravel-permission.
 
-## Permission cache per tenant
+## spatie/laravel-permission cache per tenant
 
-spatie caches the whole role and permission set under one fixed key and keeps an in-memory copy in the registrar. Without this bootstrapper, tenant B is authorized against tenant A's cached permissions in any process that switches tenants.
+spatie caches every role and permission under one key and keeps an in-memory copy in the registrar. The official docs only switch `cacheKey`; that leaves the in-memory copy of the previous tenant in place, which matters in every process that switches tenants (queue workers, `tenants:*` commands, tests).
 
 ```php
 <?php
@@ -128,44 +167,30 @@ final class PermissionCacheBootstrapper implements TenancyBootstrapper
 }
 ```
 
-## Queue and cache tables on the central connection
+Migrate spatie's tables into the tenant databases (and the central one if the central app has roles), and don't use spatie's teams feature for tenant isolation.
 
-In tenant context the default connection is the tenant's database. A `database` queue or cache store that follows the default connection writes jobs nobody polls, and binds stores to a connection tenancy is about to purge.
-
-`config/queue.php`:
+## Registration and central pins
 
 ```php
-'database' => [
-    'driver' => 'database',
-    // A job dispatched inside a tenant must land where the central worker polls;
-    // QueueTenancyBootstrapper re-initializes the tenant for each job.
-    'connection' => env('DB_QUEUE_CONNECTION', env('DB_CONNECTION', 'central')),
-    'table' => env('DB_QUEUE_TABLE', 'jobs'),
-    'queue' => env('DB_QUEUE', 'default'),
-    'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 90),
+// config/tenancy.php
+'bootstrappers' => [
+    Stancl\Tenancy\Bootstrappers\DatabaseTenancyBootstrapper::class, // or your own (per-tenant roles)
+    App\Tenancy\Bootstrappers\CachePrefixBootstrapper::class,
+    App\Tenancy\Bootstrappers\PermissionCacheBootstrapper::class,
+    Stancl\Tenancy\Bootstrappers\FilesystemTenancyBootstrapper::class,
+    Stancl\Tenancy\Bootstrappers\QueueTenancyBootstrapper::class,
 ],
 ```
 
-`config/cache.php`:
+Models the tenant plane reads from the central database:
 
 ```php
-'database' => [
-    'driver' => 'database',
-    // Tenant entries are isolated by key prefix (CachePrefixBootstrapper).
-    'connection' => env('DB_CACHE_CONNECTION', env('DB_CONNECTION', 'central')),
-    'table' => env('DB_CACHE_TABLE', 'cache'),
-    'lock_connection' => env('DB_CACHE_LOCK_CONNECTION', env('DB_CONNECTION', 'central')),
-    'lock_table' => env('DB_CACHE_LOCK_TABLE'),
-],
-```
+use Stancl\Tenancy\Database\Concerns\CentralConnection; // getConnectionName() returns the central connection
 
-## Central models used from tenant context
-
-```php
-public function getConnectionName(): ?string
+class Plan extends Model
 {
-    return config('tenancy.database.central_connection');
+    use CentralConnection;
 }
 ```
 
-Use this for anything the tenant plane reads from the central plane (shared catalogs, content libraries, the tenant registry itself).
+`TenantConnection` is the counterpart for manual mode. With the database bootstrapper active, tenant models need neither.
