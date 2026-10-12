@@ -11,6 +11,7 @@ One database per tenant, identified by its (sub)domain. Setup checklist, bootstr
 - Keep `tenancy.filesystem.asset_helper_tenancy` off. When on, every `asset()` call in tenant context points at tenant storage, so Filament and Livewire assets 404 and panels render unstyled. Use `tenant_asset()` for tenant files.
 - Panels have no route named `login`, so `auth` sends guests into a 500. Configure `redirectGuestsTo()` per plane, passing the domain parameter explicitly (`auth` runs before the route defaults are set).
 - JSON callers outside `api/*` (passkey ceremonies, `fetch()` endpoints) need `shouldRenderJsonWhen()` to also check `$request->expectsJson()`, or they get redirects instead of 401 and 422.
+- A host no tenant owns makes the identification middleware throw, which renders a 500. stancl assigns `InitializeTenancyByDomain::$onFail` while it bootstraps its features (`UniversalRoutes` sets it, overwriting what a service provider set in `boot()`). Answer such hosts with a 404 from a feature of your own listed after `UniversalRoutes` in `tenancy.features`, and let it pass universal routes on to `$next` as `UniversalRoutes` does, or Livewire breaks on the central domain.
 
 ### State that must not cross tenants
 
@@ -25,6 +26,7 @@ One database per tenant, identified by its (sub)domain. Setup checklist, bootstr
 
 - Name tenant databases through `tenancy.database.prefix`/`suffix` with an environment-specific prefix, and pin a test-only prefix in `phpunit.xml`; otherwise tests that provision and drop real databases drop dev tenants on a shared server. Parallel runs need a per-process prefix as well (`ParallelTesting::token()`), since each process numbers its tenants from 1.
 - Pin `APP_URL` and the tenant base domain in `phpunit.xml`, so URL assertions don't depend on a developer's `.env`.
+- Run the test suite (locally and in CI) as a database role with production's privileges, not as a superuser: the migrator role needs `CREATEDB` and `CREATEROLE`, and `pg_signal_backend` lets `DROP DATABASE … WITH (FORCE)` end the tenant roles' sessions. A suite run as `postgres` hides migrations and provisioning steps that need more until the first production deploy.
 - `RefreshDatabase` doesn't roll back provisioned tenant databases. End tenancy, purge tenant connections and delete the tenants in `afterEach` or `tearDown`.
 - Changes to bootstrappers, connections, grants or caches need isolation tests: tenant A cannot reach tenant B's database or data; caches and rate limits are per tenant; the permission cache does not leak within one process; queued jobs run in the tenant that dispatched them.
 - PostgreSQL words errors in the server's locale, and pdo_pgsql reports every failed connection as SQLSTATE `08006`. Assert SQLSTATE codes and catalog queries (`has_database_privilege()`), never English error text.

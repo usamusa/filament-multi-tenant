@@ -9,6 +9,7 @@
 - Pest invokes closures in a dataset before passing them, except to a parameter typed `Closure`, which receives the closure itself. Don't wrap it in a second closure.
 - Pest loads every test file into one process. Two files declaring a global helper function of the same name each pass alone and break the whole suite with a fatal redeclaration error. Give file-local helpers distinctive names and keep shared ones in `tests/Pest.php`; `grep -rhoE "^function \w+" tests | sort | uniq -d` lists clashes.
 - `expect($object)->value` is the expectation's own `value` property (the object itself), not the object's `value`. Write `expect($object->value)`.
+- `php artisan test --parallel --shard=k/n` fails: artisan passes its `--runner` option on to the `--list-tests` call Pest's sharding makes, and PHPUnit rejects it. Shard with `vendor/bin/pest --parallel --processes=N --shard=k/n`, which uses Laravel's parallel runner just the same. Pest splits shards by test file, not by run time: when one shard runs far longer than the others, record timings with `--update-shards`.
 @endif
 @if($assist->hasPackage('livewire/livewire', '^4.0'))
 
@@ -35,6 +36,8 @@
 
 - The in-process server shares the test's application, so the session store, auth guards, tenancy and Filament's navigation carry over from one request to the next unless the base test case resets them per request. `actingAs()` then signs in every browser context: don't mix it with signing in through the login form. Base test case and helpers: `filament-browser-testing` skill.
 - A click doesn't wait for a Livewire redirect. Assert something the next page shows before the next step.
+- Playwright acts as soon as an element exists, and `assertSee()` and `assertPathIs()` pass while the next page is still loading. A field filled before Livewire starts is emptied when it starts (it writes the form's empty state into its fields), and a button clicked then does nothing. pest-plugin-browser also ends `navigate()` on any page's `load` event, including the late one of the page being left, so the next step can run on a page that hasn't loaded. Keep every page hidden until its `load` event in the base test case; assertions, fills and clicks then wait for the loaded page (`filament-browser-testing` skill). Without it, suites pass on fast machines and fail at random on CI.
+- `assertSee()` matches any visible text containing the string, case ignored (Playwright's `getByText`): `assertSee('Confirmed')` already passes on a prompt reading "… must be confirmed.". To wait for a state, assert the exact element: `assertVisible('text="Confirmed"')`.
 - Never travel back in time in a browser test: the browser drops session cookies that expired in the travelled past.
 - Reach tenants as `http://<subdomain>.localhost:<port>` (Chromium resolves every `*.localhost` to loopback) and set the tenant base domain to `localhost` before service providers boot.
 - Select Filament fields by id: `[id="form.email"]`, `[id="mountedActionSchema0.name"]`. A dotted name is otherwise parsed as CSS. Searchable selects are a button plus an option list, not a native select.
