@@ -5,6 +5,12 @@
 @if($assist->hasPackage('league/flysystem-aws-s3-v3'))
 - An S3-compatible store other than AWS itself (MinIO, a hosting provider's object storage) may reject the checksum headers the AWS SDK adds to every request since early 2025. Set `request_checksum_calculation` and `response_checksum_validation` to `when_required` in such a disk's configuration.
 @endif
+@if($assist->hasPackage('phpoffice/phpword'))
+- The Word2007 reader of phpoffice/phpword loads every picture a document links to outside the file (a relationship with `TargetMode="External"`): it fetches an http or https target from the network and reads a local path from the server's disk. Before loading an uploaded `.docx`, remove external relationships other than hyperlinks from its `.rels` parts, and cap its number of entries and its unpacked size: the file is a zip.
+@endif
+@if($assist->hasPackage('barryvdh/laravel-dompdf'))
+- barryvdh/laravel-dompdf's default configuration embeds whole fonts (`enable_font_subsetting` off, so every PDF grows by hundreds of kilobytes), writes inline scripts into the PDF (`enable_javascript` on) and loads `file://` resources from anywhere under the project root (`chroot`). For PDFs that hold user content, turn subsetting on and JavaScript off, allow only `data://` in `allowed_protocols`, and embed images as data URIs.
+@endif
 @if($assist->hasPackage('spatie/laravel-permission'))
 - Seeders using `WithoutModelEvents` (Laravel's default `DatabaseSeeder` does) mute the events spatie relies on to flush its permission cache. Code that creates roles or permissions during seeding resets the cache itself (`app(PermissionRegistrar::class)->forgetCachedPermissions()`), or freshly seeded roles miss their permissions.
 @endif
