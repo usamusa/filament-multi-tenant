@@ -18,6 +18,7 @@
 
 - A component under `Livewire::test()` runs `assertSee()`, `assertDontSee()`, `assertSeeText()`, `assertDontSeeText()`, `assertSeeHtml()`, `assertDontSeeHtml()` and `assertSeeHtmlInOrder()` against its current HTML. Every other response assertion, `assertSeeInOrder()` and `assertSeeTextInOrder()` among them, goes to the last HTTP response: it passes on the first render and fails after `set()` or `call()`, whose response is the update's JSON (escaped markup such as `<\/p>` and `\u00fc`, plus the snapshot). Check order with `assertSeeHtmlInOrder()` (texts through `e()`) or in `$component->html()`.
 - `Livewire::withQueryParams()`, `withCookies()` and `withHeaders()` stay set for every later `Livewire::test()` in the same test. Call `withQueryParams()` before each `test()`, with an empty array where none apply, or a later component starts with the earlier ones.
+- A page whose record doesn't exist, or that a resource query hides, answers `Livewire::test()` with a 404 response, not an exception: Laravel's handler turns the `ModelNotFoundException` into one. Assert `assertNotFound()`; `expect(fn () => …)->toThrow()` never sees an exception.
 @endscoped
 @endif
 @if($assist->hasPackage('filament/filament', '^5.0'))
@@ -27,6 +28,7 @@
 
 - Filament silently ignores a request to mount or call an action the user can't see (hidden, unauthorized or not found): no 403, no exception. A test that calls a forbidden action and checks that nothing changed also passes when the action's name is wrong, so also assert the action hidden for that user and visible for one who may use it. The test helpers can't resolve a hidden action attached to a schema component (a section header, an entry) at all; assert that its label is missing from the page.
 - A field's test key is its absolute key: a parent layout component's `key()` becomes part of it unless set with `isInheritable: false`, and field assertions such as `assertFormFieldExists()` then miss the field.
+- An action whose submission fails validation stays mounted on the test component. A second `callAction()` for it on the same component then looks for the action inside the mounted one and fails with "Action [name] was not found for action [name]". Test the refused and the successful submission on separate `Livewire::test()` instances.
 @endscoped
 @endif
 @if($assist->hasPackage('pestphp/pest-plugin-browser'))
@@ -46,6 +48,7 @@
 - Playwright dismisses the browser's own dialogs, so a button with a confirm dialog (Livewire's `wire:confirm`) silently does nothing. Set `window.confirm` to answer true before the click (`filament-browser-testing` skill).
 - The in-process server hands the app a multipart request's raw body but none of its files (an open TODO in pest-plugin-browser), so every Livewire or Filament upload arrives empty and fails. Parse multipart bodies in the base test case into `Illuminate\Http\UploadedFile` objects created with `test: true` (a Symfony `UploadedFile` is rebuilt without its test flag, and validation then rejects a file PHP didn't upload), and create Livewire's test upload disk in `setUp()` with `FileUploadConfiguration::storage()`. Code and upload helpers: `filament-browser-testing` skill.
 - Filament renders on the server for every round trip; raise the browser timeout above the 5-second default.
+- A Filament button with `labeled-from` renders twice, icon-only and labelled, with one of them hidden at each screen width. A selector by its `href` or label matches both, and strict mode fails: add `:visible`.
 - Run WebAuthn/passkey flows with a software authenticator so the server verifies real signatures; never stub the verification.
 @endscoped
 @endif
