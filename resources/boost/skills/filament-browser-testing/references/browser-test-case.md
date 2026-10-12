@@ -15,6 +15,7 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Bootstrap\LoadConfiguration;
+use Illuminate\Foundation\Http\Events\RequestHandled;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Routing\Events\Routing;
@@ -87,6 +88,19 @@ abstract class BrowserTestCase extends TestCase
                 [$user, $guard] = $this->actingAsUser;
                 $this->app['auth']->guard($guard)->setUser($user);
                 $this->app['auth']->shouldUse($guard);
+            }
+        });
+
+        // Playwright acts as soon as an element exists, and text assertions pass
+        // while a page is still loading: a field filled before Livewire starts
+        // is emptied when it starts, a button clicked then does nothing, and the
+        // plugin ends navigate() on any page's `load` event, also the late one of
+        // the page being left. Show the test each page only once it has loaded.
+        $this->app['events']->listen(RequestHandled::class, function (RequestHandled $event): void {
+            $content = $event->response->getContent();
+
+            if (is_string($content) && str_contains($content, '<head>')) {
+                $event->response->setContent(str_replace('<head>', '<head><script>'.self::LOAD_GUARD.'</script>', $content));
             }
         });
 
@@ -185,9 +199,22 @@ abstract class BrowserTestCase extends TestCase
 
         parent::tearDown();
     }
+
+    /** Keeps the page hidden until its `load` event (10 s at most): Playwright sees no element of a hidden page. */
+    private const LOAD_GUARD = <<<'JS'
+        (function () {
+            var root = document.documentElement;
+            root.style.setProperty('visibility', 'hidden', 'important');
+            var reveal = function () { root.style.removeProperty('visibility'); };
+            window.addEventListener('load', reveal);
+            setTimeout(reveal, 10000);
+        })();
+        JS;
 }
 ```
 
-Without stancl/tenancy, drop the tenancy lines, the base-domain switch and the tenant cleanup; keep the session, guard, URL-origin and navigation resets and the upload handling.
+Without stancl/tenancy, drop the tenancy lines, the base-domain switch and the tenant cleanup; keep the session, guard, URL-origin and navigation resets, the load guard and the upload handling.
+
+The load guard makes every step wait for a fully loaded page, as a user sees it; `load` fires after Livewire has started. Without it, a suite passes on a fast machine and fails at random on slower CI runners: the first field filled after a page change comes up empty ("Please fill out this field" on submit), or a click opens nothing. It needs the layout's `<head>` tag written without attributes, as Filament's is.
 
 The multipart parser covers what Livewire's upload endpoint and plain HTML forms send (single and `[]` fields, quoted or bare boundaries). It does not handle nested names such as `a[b][c]`. Remove it once pest-plugin-browser forwards uploaded files itself; until then, an upload test without it fails before reaching your code.

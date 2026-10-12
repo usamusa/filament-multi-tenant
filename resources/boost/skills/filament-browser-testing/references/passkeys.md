@@ -388,7 +388,9 @@ $page = visit(tenantUrl($tenant, "/time-entries/{$entry->id}/edit"));
 useSoftwareAuthenticator($page, $authenticator)
     ->fill(field('ended_at'), '2026-03-02T18:00')
     ->click('Confirm with passkey')
-    ->assertSee('Confirmed')
+    // Exact: assertSee('Confirmed') would pass at once on a prompt such as
+    // "This action must be confirmed with your passkey." and save too early.
+    ->assertVisible('text="Confirmed"')
     ->press('Save')
     ->assertSee('Saved')
     ->assertNoJavaScriptErrors();
