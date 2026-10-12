@@ -1,33 +1,43 @@
 @if($assist->hasPackage('stancl/tenancy', '^3.0'))
 ## Multi-database tenancy (stancl/tenancy 3)
 
-One database per tenant, identified by its (sub)domain. Setup checklist, bootstrapper code and isolation tests: `stancl-tenancy-development` skill.
+One database per tenant, identified by its (sub)domain. Setup, reference code and isolation tests: `stancl-tenancy-development` skill. The official v3 docs are outdated in places; the skill is checked against the 3.10 source.
 
 ### Requests on tenant domains
 
 - Run the tenant identification middleware (`InitializeTenancyByDomain`, then `PreventAccessFromCentralDomains`) first in a tenant panel's middleware, before `StartSession`, so sessions and auth use the tenant database. Don't combine stancl's database-per-tenant isolation with Filament's own `->tenant()` (row-level) tenancy.
+- Keep the planes apart: every tenant route group gets `PreventAccessFromCentralDomains`; central routes are wrapped in `Route::domain()` per central domain, and central Filament panels get `->domains(config('tenancy.central_domains'))`, or they answer on every tenant host.
 - Livewire's update route lives outside the panels. Register it as a universal route with the identification middleware; otherwise Livewire requests on tenant domains read the session from the central database and every interaction, login included, fails with 419. This needs the `UniversalRoutes` feature and a registered, empty `universal` middleware group ("Target class [universal] does not exist" otherwise).
+- Livewire's upload and preview routes need the same: add `universal` and the identification middleware to `livewire.temporary_file_upload.middleware` (keeping the throttle) and to `FilePreviewController::$middleware`. Otherwise uploads land in central storage and the tenant-context save can't find them.
 - Middleware that seeds the `{tenant}` domain parameter through `URL::defaults()` must also run on the Livewire update route, guarded by `tenancy()->initialized`. Otherwise saves throw `UrlGenerationException` while Filament builds redirect and navigation URLs.
-- Keep `tenancy.filesystem.asset_helper_tenancy` off. When on, every `asset()` call in tenant context points at tenant storage, so Filament and Livewire assets 404 and panels render unstyled. Use `tenant_asset()` for tenant files.
+- Keep `tenancy.filesystem.asset_helper_tenancy` off. When on, every `asset()` call in tenant context points at tenant storage, so Filament and Livewire assets 404 and panels render unstyled. Use `tenant_asset()` for tenant files and set `TenantAssetsController::$tenancyMiddleware` to your identification middleware.
 - Panels have no route named `login`, so `auth` sends guests into a 500. Configure `redirectGuestsTo()` per plane, passing the domain parameter explicitly (`auth` runs before the route defaults are set).
 - JSON callers outside `api/*` (passkey ceremonies, `fetch()` endpoints) need `shouldRenderJsonWhen()` to also check `$request->expectsJson()`, or they get redirects instead of 401 and 422.
 - A host no tenant owns makes the identification middleware throw, which renders a 500. stancl assigns `InitializeTenancyByDomain::$onFail` while it bootstraps its features (`UniversalRoutes` sets it, overwriting what a service provider set in `boot()`). Answer such hosts with a 404 from a feature of your own listed after `UniversalRoutes` in `tenancy.features`, and let it pass universal routes on to `$next` as `UniversalRoutes` does, or Livewire breaks on the central domain.
+- Route middleware runs after controller construction: services injected into a controller constructor resolve in central context. Inject them into the action method.
+- URLs built outside a request (queued jobs and notifications, commands, the scheduler) use `app.url`, the central domain. Build tenant URLs during the request, or from the tenant's domain with `tenant_route()`.
 
 ### State that must not cross tenants
 
-- Pin the database queue connection to the central connection. In tenant context the default connection is the tenant's database, so jobs would land in a jobs table no worker polls. `QueueTenancyBootstrapper` still restores the tenant for each job.
-- stancl's `CacheTenancyBootstrapper` tags every cache call and throws on stores without tags (database, file). Isolate the cache by key prefix in a custom bootstrapper that rebuilds the stores, `cache.store`, the `RateLimiter` and spatie's permission registrar on every switch, and pin the database cache store to the central connection.
+- Pin the database queue connection, `queue.batching.database` and `queue.failed.database` to the central connection. In tenant context the default connection is the tenant's database, so jobs would land in a jobs table no worker polls. `QueueTenancyBootstrapper` still restores the tenant for each job, and since 3.8.5 ends tenancy after every job.
+- stancl's `CacheTenancyBootstrapper` tags every cache call and throws on stores without tags (database, file). Isolate the cache by key prefix in a custom bootstrapper that rebuilds the stores, `cache.store`, the `RateLimiter` and spatie's permission registrar on every switch, and pin the database cache store to the central connection. Under a prefix bootstrapper `global_cache()` is not central; use a store with its own fixed `prefix` for central data and for cached tenant lookup.
 - spatie/laravel-permission caches every role and permission under one key and in memory. A bootstrapper sets `permission.cache.key` per tenant and calls `PermissionRegistrar::initializeCache()` on bootstrap and revert; without it, any process that switches tenants (queue workers, `tenants:*` commands, tests) authorizes one tenant with another tenant's permissions. Don't use spatie's teams feature for tenant isolation.
-- Central models read from tenant context return `config('tenancy.database.central_connection')` from `getConnectionName()`.
+- Sessions: keep `SESSION_DOMAIN` unset (host-only cookies) and store sessions per tenant (the tenant database, or Redis prefixed per tenant), or add `ScopeSessions` after `StartSession`. With a shared session store, a session from tenant A authenticates as the user with the same id at tenant B.
+- Central models read from tenant context return `config('tenancy.database.central_connection')` from `getConnectionName()` (stancl's `CentralConnection` trait).
+- `$tenant->run()`, `tenancy()->central()` and `runForMultiple()` don't restore the previous context when the callback throws: end tenancy in a `finally` in loops that catch exceptions. `runForMultiple()` with an empty list runs for every tenant.
+- With `suffix_storage_path` on, anything that calls `storage_path()` at runtime resolves into `storage/tenant<key>` (real-time facades, Passport's key lookup): create the folders during provisioning, or give such packages absolute paths at boot.
 - A queued job that touches tenant data asserts the tenant context at the top of `handle()`.
 - Every new stateful service (cache, session, rate limiter, disk, static or singleton state) is deliberately central or per tenant, proven by a test that switches tenants within one process.
 
 ### Databases, environments and tests
 
+- Never define a connection named `tenant` in `config/database.php`: the package writes and purges it. A tenant's database name is stored on the tenant when its database is created, so later prefix changes only affect new tenants.
 - Name tenant databases through `tenancy.database.prefix`/`suffix` with an environment-specific prefix, and pin a test-only prefix in `phpunit.xml`; otherwise tests that provision and drop real databases drop dev tenants on a shared server. Parallel runs need a per-process prefix as well (`ParallelTesting::token()`), since each process numbers its tenants from 1.
+- Put `'--force' => true` into `tenancy.seeder_parameters` (it ships commented out); seeding in the provisioning pipeline needs it in production.
 - Pin `APP_URL` and the tenant base domain in `phpunit.xml`, so URL assertions don't depend on a developer's `.env`.
 - Run the test suite (locally and in CI) as a database role with production's privileges, not as a superuser: the migrator role needs `CREATEDB` and `CREATEROLE`, and `pg_signal_backend` lets `DROP DATABASE … WITH (FORCE)` end the tenant roles' sessions. A suite run as `postgres` hides migrations and provisioning steps that need more until the first production deploy.
-- `RefreshDatabase` doesn't roll back provisioned tenant databases. End tenancy, purge tenant connections and delete the tenants in `afterEach` or `tearDown`.
-- Changes to bootstrappers, connections, grants or caches need isolation tests: tenant A cannot reach tenant B's database or data; caches and rate limits are per tenant; the permission cache does not leak within one process; queued jobs run in the tenant that dispatched them.
+- `RefreshDatabase` doesn't roll back provisioned tenant databases. End tenancy, purge tenant connections and delete the tenants in `afterEach` or `tearDown`; PostgreSQL refuses to drop a database while a connection to it is open, in production too.
+- `Event::fake()` without a list swallows the tenancy events, so tenancy never bootstraps and queries hit the central database. Fake only the events the test asserts.
+- Changes to bootstrappers, connections, grants, caches or sessions need isolation tests: tenant A cannot reach tenant B's database or data; caches, rate limits, files and sessions are per tenant; the permission cache does not leak within one process; queued jobs run in the tenant that dispatched them.
 - PostgreSQL words errors in the server's locale, and pdo_pgsql reports every failed connection as SQLSTATE `08006`. Assert SQLSTATE codes and catalog queries (`has_database_privilege()`), never English error text.
 @endif
