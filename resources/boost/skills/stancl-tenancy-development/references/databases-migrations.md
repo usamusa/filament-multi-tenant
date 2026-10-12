@@ -60,7 +60,7 @@ php artisan tenants:migrate --tenants=1 --tenants=7
 ## Rolling back, wiping and seeding
 
 - `tenants:rollback` and `tenants:migrate-fresh` (which runs `db:wipe` on the tenant connection, then migrates) destroy tenant data across the fleet. Keep them out of production. If tenants connect with least-privilege roles, these commands fail on ownership, which is the point.
-- `tenants:seed` seeds with `tenancy.seeder_parameters` (`--class`, and `'--force' => true`, which production needs).
+- `tenants:seed` runs the root seeder named in `tenancy.seeder_parameters['--class']` inside every tenant (plus `'--force' => true`, which production needs). The shipped default is the central `DatabaseSeeder`: give the tenants a root seeder of their own (a fully qualified class name, for example `Database\Seeders\Tenant\TenantDatabaseSeeder`) that calls only tenant seeders, or every tenant receives the central seed data — or the command fails where central seeding refuses tenant context.
 
 ## Running your own commands for tenants
 

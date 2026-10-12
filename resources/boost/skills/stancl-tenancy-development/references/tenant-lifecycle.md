@@ -65,7 +65,7 @@ Events\TenantCreated::class => [
 - `->shouldBeQueued(true)` keeps signup requests fast, but the tenant row then exists before its database. Gate access on the status, never on the row's existence. `JobPipeline::$shouldBeQueuedByDefault = true` changes the default for every pipeline.
 - `Tenant::create(['tenancy_create_database' => false])` adopts a database that already exists: `CreateDatabase` returns `false`, which stops the **whole** pipeline, migrations included.
 - Domains are usually created after the tenant, so pipeline jobs can't rely on them. Pass what they need through the tenant's attributes.
-- `SeedDatabase` runs `tenants:seed`, which, like `db:seed`, needs `--force` in production. The default config ships that line commented out: put `'--force' => true` into `tenancy.seeder_parameters`.
+- `SeedDatabase` runs `tenants:seed`, which, like `db:seed`, needs `--force` in production. The default config ships that line commented out: put `'--force' => true` into `tenancy.seeder_parameters`. It seeds the class in `'--class'`, by default the central `DatabaseSeeder`: point it at a root seeder for tenants.
 
 ## Deletion
 
