@@ -10,6 +10,7 @@
 - Pest loads every test file into one process. Two files declaring a global helper function of the same name each pass alone and break the whole suite with a fatal redeclaration error. Give file-local helpers distinctive names and keep shared ones in `tests/Pest.php`; `grep -rhoE "^function \w+" tests | sort | uniq -d` lists clashes.
 - `expect($object)->value` is the expectation's own `value` property (the object itself), not the object's `value`. Write `expect($object->value)`.
 - `php artisan test --parallel --shard=k/n` fails: artisan passes its `--runner` option on to the `--list-tests` call Pest's sharding makes, and PHPUnit rejects it. Shard with `vendor/bin/pest --parallel --processes=N --shard=k/n`, which uses Laravel's parallel runner just the same. Pest splits shards by test file, not by run time: when one shard runs far longer than the others, record timings with `--update-shards`.
+- Pest runs no test from a `<file>` entry of a phpunit.xml test suite: `--testsuite` lists and runs none of them, without a warning (seen with Pest 5.2 and PHPUnit 13). Build test suites, such as named groups for CI jobs, from `<directory>` entries, and guard the grouping with a test that holds every test file to exactly one suite and forbids single files, or tests drop out of CI unnoticed.
 @endif
 @if($assist->hasPackage('livewire/livewire', '^4.0'))
 
