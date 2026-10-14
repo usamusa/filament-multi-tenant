@@ -33,4 +33,12 @@
 - For a German (or other noun-capitalizing) UI: Filament lower-cases a label's first letter in validation messages. Keep labels as written by setting `validationAttribute()` in `Field::configureUsing()`. Publish and translate Laravel's `validation`, `auth`, `passwords` and `pagination` lang files, or errors and error pages show in English.
 - Filament renders the `PanelsRenderHook::FOOTER` hook in both of its layouts: under every page of the panel and under the simple pages (sign-in, password reset). Register content meant for all of them, such as links to legal pages, for `FOOTER` alone; registered for `SIMPLE_PAGE_END` as well, it shows twice on the sign-in pages.
 @endscoped
+
+@scoped(['app/Filament/**', 'app/Providers/**', 'resources/css/**', 'resources/views/**'])
+## Filament 5: themes and phones
+
+- Filament's own styles sit in cascade layers (`base`, `components`, `utilities`). A custom theme's rules outside any layer override them whatever their specificity, Tailwind's utility classes included: keep such rules narrow (a breakpoint, a class of your own), or they restyle every panel at every width.
+- `stackedOnMobile()` puts each cell's column label into the markup, hidden from `sm` up, so a cell's `textContent` starts with the label: read `.fi-ta-cell-content`. Every cell also wraps its content in a link of its own to the record, so a stacked row is several small targets. To make the row one tap target, stretch the first cell's link over the row with an absolutely positioned `::after` (stacked rows are positioned below `sm`) and keep the row's other controls positioned above it.
+- Filament's link pins its label to the baseline (`.fi-link-label`). In a link made taller, such as for a 44 px touch target, the label rides above the link's icon: centre the label too.
+@endscoped
 @endif

@@ -53,5 +53,7 @@
 - Filament renders on the server for every round trip; raise the browser timeout above the 5-second default.
 - A Filament button with `labeled-from` renders twice, icon-only and labelled, with one of them hidden at each screen width. A selector by its `href` or label matches both, and strict mode fails: add `:visible`.
 - Run WebAuthn/passkey flows with a software authenticator so the server verifies real signatures; never stub the verification.
+- Playwright refuses to click an element that another element covers ("… intercepts pointer events") and retries until the timeout, even when both are links to the same address. Where links are stretched over a card, stretch only one per card, and click that one.
+- A Livewire lazy component (Filament's widgets are lazy by default) and a Filament upload field (FilePond, loaded when it becomes visible) appear only once scrolled into view. A check that measures or screenshots a whole page scrolls through it and waits for them first, or it measures their placeholders.
 @endscoped
 @endif
