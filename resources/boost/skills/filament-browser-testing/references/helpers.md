@@ -238,6 +238,38 @@ waitUntil($page, "(() => { const img = document.querySelector('.fi-in-entry img'
 
 Keep fixtures small: a few bytes of a real format are enough for the type checks (a one-pixel PNG, a minimal PDF).
 
+Reading a value from a page just opened with `navigate()`: the browser plugin can end the navigation on the late `load` event of the page being left, and `script()` returns the error text, a string, when a navigation replaces the page while it runs. Mark the page being left, then read until a wholly loaded page without the mark answers; the value travels wrapped, so `null` or a string the page returns is told apart from that error text.
+
+```php
+/**
+ * Opens a page and returns what $expression gives there once the page has
+ * loaded in place of the one before.
+ */
+function readAfterNavigation(mixed $page, string $url, string $path, string $expression, float $timeoutSeconds = 15): mixed
+{
+    $page->script('() => { window.__left = true; }');
+    $page->navigate($url);
+
+    $deadline = microtime(true) + $timeoutSeconds;
+
+    do {
+        $answer = $page->script('() => window.__left === undefined && document.readyState === "complete" && location.pathname === '
+            .json_encode($path, JSON_UNESCAPED_SLASHES).' ? { value: ('.$expression.') } : null');
+
+        if (is_array($answer) && array_key_exists('value', $answer)) {
+            return $answer['value'];
+        }
+
+        usleep(100_000);
+    } while (microtime(true) < $deadline);
+
+    throw new RuntimeException("{$path} did not finish loading.");
+}
+
+// Content-Security-Policy violations a script in the base test case collects:
+$violations = readAfterNavigation($page, $url, '/reports', 'window.__cspViolations || []');
+```
+
 Reading a Filament notification in a feature test: Livewire's dehydrate moves notifications to the session's `filament.claimed_notifications` key, and `assertNotified()` compares the title only.
 
 ```php

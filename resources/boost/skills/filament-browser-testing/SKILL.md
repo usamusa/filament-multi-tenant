@@ -59,7 +59,8 @@ it('saves a manager\'s correction of a colleague\'s time entry', function () {
 
 ## Traps
 
-- **Shared application**: without the base test case, the session, auth guards, tenancy and Filament's navigation carry over between requests, so tests pass for the wrong reason or leak a signed-in user into another context.
+- **Shared application**: without the base test case, the session, auth guards, tenancy and Filament's navigation carry over between requests, so tests pass for the wrong reason or leak a signed-in user into another context; and Filament's scoped `originalRequest`, unless forgotten per request, makes the menu mark the first page of the session as the current one.
+- **Reading after a navigation**: `script()` returns the browser's error text, a string, when a navigation replaces the page under it. Read values from a page just opened with `readAfterNavigation()` (references/helpers.md).
 - **Livewire redirects**: `click()` and `press()` don't wait for them; the next `fill()` then runs on the old page.
 - **Half-loaded pages**: `assertSee()` and `assertPathIs()` pass while the next page is still loading, and pest-plugin-browser ends `navigate()` on any page's `load` event, also the late one of the page being left. A field filled before Livewire starts is emptied when it starts; a button clicked then does nothing. The load guard in the base test case hides each page until `load`, so every step waits. Without it, the first field filled after a page change comes up empty at random, mostly on CI.
 - **Text assertions**: `assertSee()` matches any text containing the string, case ignored. Wait for a state with an exact match (`assertVisible('text="Confirmed"')`), or it passes on a prompt that merely mentions the word.

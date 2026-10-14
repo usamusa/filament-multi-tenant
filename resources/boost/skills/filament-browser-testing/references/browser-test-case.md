@@ -111,13 +111,15 @@ abstract class BrowserTestCase extends TestCase
 
         // Tenancy initialized by one request must not leak into the next one
         // (or into a central panel), nor Filament's navigation, which is built
-        // once per request for the signed-in user.
+        // once per request for the signed-in user, nor the scoped request it
+        // marks the current page by (kept, the menu marks the first page).
         $this->app->terminating(function (): void {
             if (tenancy()->initialized) {
                 tenancy()->end();
             }
 
             $this->app->forgetInstance(NavigationManager::class);
+            $this->app->forgetInstance('originalRequest');
 
             foreach ($this->uploadedTempFiles as $path) {
                 if (is_file($path)) {
