@@ -16,6 +16,7 @@ One database per tenant, identified by its (sub)domain. Setup, reference code an
 - A host no tenant owns makes the identification middleware throw, which renders a 500. stancl assigns `InitializeTenancyByDomain::$onFail` while it bootstraps its features (`UniversalRoutes` sets it, overwriting what a service provider set in `boot()`). Answer such hosts with a 404 from a feature of your own listed after `UniversalRoutes` in `tenancy.features`, and let it pass universal routes on to `$next` as `UniversalRoutes` does, or Livewire breaks on the central domain.
 - Route middleware runs after controller construction: services injected into a controller constructor resolve in central context. Inject them into the action method.
 - URLs built outside a request (queued jobs and notifications, commands, the scheduler) use `app.url`, the central domain. Build tenant URLs during the request, or from the tenant's domain with `tenant_route()`.
+- Give URLs in a panel's configuration (`favicon()`, `brandLogo()`) a root-relative path, not `asset()` or `url()`: the configuration runs when the application boots, so they carry the host of that moment, which is `APP_URL` wherever it boots before or without the request (tests, the in-process browser-test server, Octane). Every tenant host then loads the icon from another origin, which a content security policy limited to `'self'` reports or blocks.
 
 ### State that must not cross tenants
 
