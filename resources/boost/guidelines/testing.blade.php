@@ -29,6 +29,7 @@
 
 - Filament silently ignores a request to mount or call an action the user can't see (hidden, unauthorized or not found): no 403, no exception. A test that calls a forbidden action and checks that nothing changed also passes when the action's name is wrong, so also assert the action hidden for that user and visible for one who may use it. The test helpers can't resolve a hidden action attached to a schema component (a section header, an entry) at all; assert that its label is missing from the page.
 - A field's test key is its absolute key: a parent layout component's `key()` becomes part of it unless set with `isInheritable: false`, and field assertions such as `assertFormFieldExists()` then miss the field.
+- `goToNextWizardStep()` sets the wizard's next step before validating the current one and leaves it set when `afterValidation()` throws `Halt`: `assertWizardCurrentStep()` then reports the next step although the browser stays, since the browser moves only on the `next-wizard-step` event. After a halted step assert `assertNotDispatched('next-wizard-step')`, and `assertDispatched('next-wizard-step')` where the step does move, so the negative check can fail.
 - An action whose submission fails validation stays mounted on the test component. A second `callAction()` for it on the same component then looks for the action inside the mounted one and fails with "Action [name] was not found for action [name]". Test the refused and the successful submission on separate `Livewire::test()` instances.
 @endscoped
 @endif
