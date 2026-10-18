@@ -56,5 +56,6 @@
 - Run WebAuthn/passkey flows with a software authenticator so the server verifies real signatures; never stub the verification.
 - Playwright refuses to click an element that another element covers ("… intercepts pointer events") and retries until the timeout, even when both are links to the same address. Where links are stretched over a card, stretch only one per card, and click that one.
 - A Livewire lazy component (Filament's widgets are lazy by default) and a Filament upload field (FilePond, loaded when it becomes visible) appear only once scrolled into view. A check that measures or screenshots a whole page scrolls through it and waits for them first, or it measures their placeholders.
+- Filament scrolls to the first validation error 200 ms after it appears; up to 5.10.1 the handler scrolls the error node's field wrapper without checking that the node is still on the page (5.10.2 checks). A browser test that corrects a refused form and resubmits within that window, so that the response without the error has morphed the node away, gets `Uncaught TypeError: Cannot read properties of null (reading 'scrollIntoView')`, once per schema handling the event, and `assertNoJavaScriptErrors()` fails or passes with the timing. Below 5.10.2, pause a moment after asserting the error before correcting the form, as a person reads it first.
 @endscoped
 @endif
