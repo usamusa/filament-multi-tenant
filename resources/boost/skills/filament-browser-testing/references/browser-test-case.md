@@ -10,6 +10,7 @@ declare(strict_types=1);
 namespace Tests;
 
 use App\Models\Tenant;
+use Filament\Facades\Filament;
 use Filament\Navigation\NavigationManager;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Console\Kernel;
@@ -81,6 +82,14 @@ abstract class BrowserTestCase extends TestCase
             // keeps one session store and one set of guards, which would carry
             // the last request's sign-in into another context. Start every
             // request empty; only an explicit actingAs() signs every context in.
+            // Filament keeps the current panel in its shared manager; a request
+            // to one panel after a request to another would start as the
+            // other's until the panel middleware runs, and since Filament 5.10
+            // a lazy widget is authorized on hydrate, where that shows (the
+            // guard and the user it sees). Start each request without a
+            // panel, as a fresh process does.
+            Filament::setCurrentPanel(null);
+
             $this->app['session']->driver()->flush();
             $this->app['auth']->forgetGuards();
 
