@@ -55,6 +55,11 @@ abstract class BrowserTestCase extends TestCase
             // is rebuilt on every tenancy switch; the database store persists
             // inside the test transaction.
             $app['config']->set('cache.default', 'database');
+
+            // Sessions in the database, as in production: a tenant's in its
+            // own table, where a list of signed-in devices reads them. Built
+            // per request, after tenancy — see setUp().
+            $app['config']->set('session.driver', 'database');
         });
 
         $this->traitsUsedByTest = class_uses_recursive(static::class);
@@ -80,8 +85,12 @@ abstract class BrowserTestCase extends TestCase
 
             // Each browser context is its own visitor. The shared application
             // keeps one session store and one set of guards, which would carry
-            // the last request's sign-in into another context. Start every
-            // request empty; only an explicit actingAs() signs every context in.
+            // the last request's sign-in into another context. Forget both
+            // before StartSession runs: the store is then built anew for this
+            // request, after tenancy — as a fresh process builds it — in the
+            // tenant's own sessions table and with its lifetime; the guards
+            // find it through the forgotten 'session.store' singleton. Only an
+            // explicit actingAs() signs every context in.
             // Livewire keeps per-request state in its manager, among it the
             // persistent-middleware bookkeeping that applies a page's middleware
             // once per route and request. A request is a process in production,
@@ -98,8 +107,15 @@ abstract class BrowserTestCase extends TestCase
             // panel, as a fresh process does.
             Filament::setCurrentPanel(null);
 
-            $this->app['session']->driver()->flush();
+            $this->app['session']->forgetDrivers();
+            $this->app->forgetInstance('session.store');
             $this->app['auth']->forgetGuards();
+            // Laravel keeps the default guard as the 'auth.driver' singleton
+            // too (what Illuminate\Contracts\Auth\Guard resolves to): built
+            // in one request, it would answer every later one — the database
+            // session handler asks it for the user id and would save every
+            // session row without one.
+            $this->app->forgetInstance('auth.driver');
 
             if ($this->actingAsUser !== null) {
                 [$user, $guard] = $this->actingAsUser;
@@ -223,13 +239,32 @@ abstract class BrowserTestCase extends TestCase
         parent::tearDown();
     }
 
-    /** Keeps the page hidden until its `load` event (10 s at most): Playwright sees no element of a hidden page. */
+    /**
+     * Keeps the page hidden until its `load` event and until every field bound
+     * with wire:model carries Alpine's binding (10 s at most): Playwright sees
+     * no element of a hidden page. Filament loads the scripts of some
+     * components (tabs, the password reveal, editors) after `load` and binds
+     * the fields inside only once they arrive; a value typed before is dropped
+     * when the binding sets the field from the component's data.
+     */
     private const LOAD_GUARD = <<<'JS'
         (function () {
             var root = document.documentElement;
             root.style.setProperty('visibility', 'hidden', 'important');
             var reveal = function () { root.style.removeProperty('visibility'); };
-            window.addEventListener('load', reveal);
+            var bound = function () {
+                var fields = document.querySelectorAll('input, textarea, select');
+                for (var i = 0; i < fields.length; i++) {
+                    var attributes = fields[i].attributes;
+                    for (var j = 0; j < attributes.length; j++) {
+                        if (attributes[j].name.indexOf('wire:model') === 0 && ! fields[i]._x_model) { return false; }
+                    }
+                }
+                return true;
+            };
+            window.addEventListener('load', function () {
+                (function check() { bound() ? reveal() : setTimeout(check, 50); })();
+            });
             setTimeout(reveal, 10000);
         })();
         JS;
@@ -238,6 +273,6 @@ abstract class BrowserTestCase extends TestCase
 
 Without stancl/tenancy, drop the tenancy lines, the base-domain switch and the tenant cleanup; keep the session, guard, URL-origin and navigation resets, the load guard and the upload handling.
 
-The load guard makes every step wait for a fully loaded page, as a user sees it; `load` fires after Livewire has started. Without it, a suite passes on a fast machine and fails at random on slower CI runners: the first field filled after a page change comes up empty ("Please fill out this field" on submit), or a click opens nothing. It needs the layout's `<head>` tag written without attributes, as Filament's is.
+The load guard makes every step wait for a fully loaded page, as a user sees it; `load` fires after Livewire has started. Without it, a suite passes on a fast machine and fails at random on slower CI runners: the first field filled after a page change comes up empty ("Please fill out this field" on submit), or a click opens nothing. It also waits until every `wire:model` field carries Alpine's `_x_model`: Filament's lazily loaded components (tabs, the password reveal, editors) bind their fields only once their script has arrived, after `load`, and a value typed before is dropped at that moment — seen as a password field emptied while the other fields kept theirs. It needs the layout's `<head>` tag written without attributes, as Filament's is.
 
 The multipart parser covers what Livewire's upload endpoint and plain HTML forms send (single and `[]` fields, quoted or bare boundaries). It does not handle nested names such as `a[b][c]`. pest-plugin-browser 5.1 parses the parts itself but keeps a nested name such as `files[]` flat, so the parser stays and replaces what the plugin found; an upload test without it fails before reaching your code.
