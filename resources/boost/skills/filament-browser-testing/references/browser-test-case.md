@@ -240,32 +240,56 @@ abstract class BrowserTestCase extends TestCase
     }
 
     /**
-     * Keeps the page hidden until its `load` event and until every field bound
-     * with wire:model carries Alpine's binding (10 s at most): Playwright sees
-     * no element of a hidden page. Filament loads the scripts of some
-     * components (tabs, the password reveal, editors) after `load` and binds
-     * the fields inside only once they arrive; a value typed before is dropped
-     * when the binding sets the field from the component's data.
+     * Keeps the page hidden until its `load` event (10 s at most): Playwright
+     * sees no element of a hidden page. Then, for ten seconds, keeps every
+     * field bound with wire:model out of reach until Alpine has bound it:
+     * Filament loads the scripts of some components (tabs, the password
+     * reveal, editors) after `load` and binds the fields inside only once
+     * they arrive; a value typed before is dropped when the binding sets the
+     * field from the component's data. Read-only, or disabled where read-only
+     * means nothing (selects, checkboxes), Playwright waits for the field to
+     * become editable. Not by hiding the page longer: Filament's upload field
+     * defers its own set-up while hidden and never resumes.
      */
     private const LOAD_GUARD = <<<'JS'
         (function () {
             var root = document.documentElement;
             root.style.setProperty('visibility', 'hidden', 'important');
             var reveal = function () { root.style.removeProperty('visibility'); };
-            var bound = function () {
+            window.addEventListener('load', reveal);
+            setTimeout(reveal, 10000);
+
+            var MARK = 'data-load-guard';
+            var hasModel = function (field) {
+                for (var i = 0; i < field.attributes.length; i++) {
+                    if (field.attributes[i].name.indexOf('wire:model') === 0) { return true; }
+                }
+                return false;
+            };
+            var release = function (field) {
+                if (field.getAttribute(MARK) === 'disabled') { field.disabled = false; } else { field.readOnly = false; }
+                field.removeAttribute(MARK);
+            };
+            var guard = function (last) {
                 var fields = document.querySelectorAll('input, textarea, select');
                 for (var i = 0; i < fields.length; i++) {
-                    var attributes = fields[i].attributes;
-                    for (var j = 0; j < attributes.length; j++) {
-                        if (attributes[j].name.indexOf('wire:model') === 0 && ! fields[i]._x_model) { return false; }
+                    var field = fields[i];
+                    if (field.hasAttribute(MARK)) {
+                        if (last || field._x_model) { release(field); }
+                        continue;
                     }
+                    if (last || field._x_model || ! hasModel(field) || field.readOnly || field.disabled) { continue; }
+                    var byDisabling = field.tagName === 'SELECT' || ['checkbox', 'radio', 'file', 'hidden'].indexOf(field.type) !== -1;
+                    field.setAttribute(MARK, byDisabling ? 'disabled' : 'readonly');
+                    if (byDisabling) { field.disabled = true; } else { field.readOnly = true; }
                 }
-                return true;
             };
-            window.addEventListener('load', function () {
-                (function check() { bound() ? reveal() : setTimeout(check, 50); })();
-            });
-            setTimeout(reveal, 10000);
+            var started = Date.now();
+            (function tick() {
+                var last = Date.now() - started > 10000;
+                guard(last);
+                if (! last) { setTimeout(tick, 50); }
+            })();
         })();
         JS;
 }
@@ -273,6 +297,6 @@ abstract class BrowserTestCase extends TestCase
 
 Without stancl/tenancy, drop the tenancy lines, the base-domain switch and the tenant cleanup; keep the session, guard, URL-origin and navigation resets, the load guard and the upload handling.
 
-The load guard makes every step wait for a fully loaded page, as a user sees it; `load` fires after Livewire has started. Without it, a suite passes on a fast machine and fails at random on slower CI runners: the first field filled after a page change comes up empty ("Please fill out this field" on submit), or a click opens nothing. It also waits until every `wire:model` field carries Alpine's `_x_model`: Filament's lazily loaded components (tabs, the password reveal, editors) bind their fields only once their script has arrived, after `load`, and a value typed before is dropped at that moment — seen as a password field emptied while the other fields kept theirs. It needs the layout's `<head>` tag written without attributes, as Filament's is.
+The load guard makes every step wait for a fully loaded page, as a user sees it; `load` fires after Livewire has started. Without it, a suite passes on a fast machine and fails at random on slower CI runners: the first field filled after a page change comes up empty ("Please fill out this field" on submit), or a click opens nothing. It also keeps every `wire:model` field read-only (selects and checkboxes disabled) until it carries Alpine's `_x_model`: Filament's lazily loaded components (tabs, the password reveal, editors) bind their fields only once their script has arrived, after `load`, and a value typed before is dropped at that moment — seen as a password field emptied while the other fields kept theirs. Playwright waits for an editable field. Hiding the page until then instead stalls Filament's upload field, which defers its own set-up while an ancestor is hidden and resumes only on a resize. It needs the layout's `<head>` tag written without attributes, as Filament's is.
 
 The multipart parser covers what Livewire's upload endpoint and plain HTML forms send (single and `[]` fields, quoted or bare boundaries). It does not handle nested names such as `a[b][c]`. pest-plugin-browser 5.1 parses the parts itself but keeps a nested name such as `files[]` flat, so the parser stays and replaces what the plugin found; an upload test without it fails before reaching your code.
