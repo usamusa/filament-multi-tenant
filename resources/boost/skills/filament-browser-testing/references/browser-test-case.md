@@ -131,20 +131,24 @@ abstract class BrowserTestCase extends TestCase
     }
 
     /**
-     * The in-process server hands the app a multipart request's raw body but
-     * none of its files (an open TODO in pest-plugin-browser), so a Livewire
-     * upload arrives empty. Parse the parts into files and fields as PHP's SAPI
-     * would, for the `name` and `name[]` fields browsers send.
+     * The in-process server hands the app a multipart request's files only as
+     * the plugin parses them: since pest-plugin-browser 5.1 it does, but a
+     * nested name such as Livewire's `files[]` stays a flat key where PHP
+     * would nest it, so an upload still arrives empty (before 5.1 the files
+     * were dropped altogether). Parse the parts into files and fields as
+     * PHP's SAPI would, in place of what the plugin found, for the `name`
+     * and `name[]` fields browsers send.
      */
     private function parseMultipartBody(Request $request): void
     {
         $contentType = (string) $request->headers->get('Content-Type');
 
         if (! str_starts_with(strtolower($contentType), 'multipart/form-data')
-            || $request->files->count() > 0
             || preg_match('/boundary=(?:"([^"]+)"|([^;\s]+))/i', $contentType, $boundary) !== 1) {
             return;
         }
+
+        $request->files->replace([]);
 
         $files = [];
         $fields = [];
@@ -219,4 +223,4 @@ Without stancl/tenancy, drop the tenancy lines, the base-domain switch and the t
 
 The load guard makes every step wait for a fully loaded page, as a user sees it; `load` fires after Livewire has started. Without it, a suite passes on a fast machine and fails at random on slower CI runners: the first field filled after a page change comes up empty ("Please fill out this field" on submit), or a click opens nothing. It needs the layout's `<head>` tag written without attributes, as Filament's is.
 
-The multipart parser covers what Livewire's upload endpoint and plain HTML forms send (single and `[]` fields, quoted or bare boundaries). It does not handle nested names such as `a[b][c]`. Remove it once pest-plugin-browser forwards uploaded files itself; until then, an upload test without it fails before reaching your code.
+The multipart parser covers what Livewire's upload endpoint and plain HTML forms send (single and `[]` fields, quoted or bare boundaries). It does not handle nested names such as `a[b][c]`. pest-plugin-browser 5.1 parses the parts itself but keeps a nested name such as `files[]` flat, so the parser stays and replaces what the plugin found; an upload test without it fails before reaching your code.
