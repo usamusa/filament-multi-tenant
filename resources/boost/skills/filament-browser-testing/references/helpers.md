@@ -270,6 +270,21 @@ function readAfterNavigation(mixed $page, string $url, string $path, string $exp
 $violations = readAfterNavigation($page, $url, '/reports', 'window.__cspViolations || []');
 ```
 
+Opening a page that takes longer than a second to load: the plugin runs `navigate()` like an assertion, in attempts of one second, and asks for the page again after each. A slow page (a heavy editor, a whole year's calendar, any page on a slow CI runner) then fails with "Timeout 1000ms exceeded", the screenshot blank while the load guard still hides the page, or with "Navigation to … is interrupted by another navigation". Open it with one navigation that waits the browser timeout; the load guard then holds the next step until the page has loaded.
+
+```php
+/** Opens $url with one navigation that waits the browser timeout for the page to load. */
+function navigateOnce(mixed $page, string $url): mixed
+{
+    $page->page()->goto($url);
+
+    return $page;
+}
+
+navigateOnce($page, tenantUrl($tenant, '/workflows/'.$workflow->id))
+    ->click('Publish');
+```
+
 Reading a Filament notification in a feature test: Livewire's dehydrate moves notifications to the session's `filament.claimed_notifications` key, and `assertNotified()` compares the title only.
 
 ```php
