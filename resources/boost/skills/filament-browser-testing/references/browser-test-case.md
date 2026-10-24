@@ -105,11 +105,12 @@ abstract class BrowserTestCase extends TestCase
             // find it through the forgotten 'session.store' singleton. Only an
             // explicit actingAs() signs every context in.
             // Livewire keeps per-request state in its manager, among it the
-            // persistent-middleware bookkeeping that applies a page's middleware
-            // once per route and request. A request is a process in production,
-            // not here, so a later Livewire request for the same page would
-            // skip SetUpPanel and Authenticate: flush the state as Livewire's
-            // own test harness does between renders.
+            // persistent-middleware bookkeeping, which skips a page's middleware
+            // for a snapshot of the route it last ran them for (since 4.4.8;
+            // before, of any route it had run them for). A request is a process
+            // in production, not here, so a later Livewire request for the same
+            // page would skip SetUpPanel and Authenticate: flush the state as
+            // Livewire's own test harness does between renders.
             app('livewire')->flushState();
 
             // Filament keeps the current panel in its shared manager; a request

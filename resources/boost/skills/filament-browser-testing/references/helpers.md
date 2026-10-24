@@ -296,16 +296,23 @@ waitForPage($page, '/workflows/'.$workflow->id)
     ->click('Publish');
 ```
 
-Reading a Filament notification in a feature test: Livewire's dehydrate moves notifications to the session's `filament.claimed_notifications` key, and `assertNotified()` compares the title only.
+Reading a Filament notification in a feature test: since Filament 5.10 notifications go through `NotificationMailbox`, not the session, and `assertNotified()` compares the title only. Flush the pending notifications, pull them and push them back for whoever reads them next. This reads notifications without a batch: those of `Livewire::test()`, which runs no middleware, and of a request that is no Livewire response. Since 5.10.3 a Livewire response through the kernel publishes its notifications under a batch (its `X-Filament-Notifications` header): pass that to `pull()`.
 
 ```php
 /** @return array<string, mixed> */
 function sentNotification(string $title): array
 {
-    return collect([
-        ...session('filament.claimed_notifications', []),
-        ...session('filament.notifications', []),
-    ])->firstWhere('title', $title)
+    $mailbox = app(\Filament\Notifications\NotificationMailbox::class);
+    $mailbox->flush();
+    $notifications = $mailbox->pull();
+
+    foreach ($notifications as $notification) {
+        $mailbox->push($notification);
+    }
+
+    $mailbox->flush();
+
+    return collect($notifications)->firstWhere('title', $title)
         ?? throw new RuntimeException("No notification titled \"{$title}\" was sent.");
 }
 ```
