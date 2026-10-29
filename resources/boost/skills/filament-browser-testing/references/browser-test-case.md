@@ -22,6 +22,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Routing\Events\Routing;
 use Illuminate\Support\Facades\URL;
 use Livewire\Features\SupportFileUploads\FileUploadConfiguration;
+use Tests\Support\TestApplications;
 
 abstract class BrowserTestCase extends TestCase
 {
@@ -78,6 +79,11 @@ abstract class BrowserTestCase extends TestCase
         $this->traitsUsedByTest = class_uses_recursive(static::class);
 
         $app->make(Kernel::class)->bootstrap();
+
+        // Refuse anything but the test configuration before RefreshDatabase
+        // migrates, and approve this application for the cleanup in tearDown()
+        // (stancl-tenancy-development skill, isolation tests).
+        TestApplications::approve($app);
 
         return $app;
     }
@@ -163,16 +169,23 @@ abstract class BrowserTestCase extends TestCase
         FileUploadConfiguration::storage();
 
         // Tenancy initialized by one request must not leak into the next one
-        // (or into a central panel), nor Filament's navigation, which is built
-        // once per request for the signed-in user, nor the scoped request it
-        // marks the current page by (kept, the menu marks the first page).
+        // (or into a central panel), nor a scoped binding that keeps what one
+        // request read: nothing in a test resets scoped instances. Forget them
+        // by name, never all of them with forgetScopedInstances(): Filament's
+        // managers behind facades and the test's doubles live there too.
         $this->app->terminating(function (): void {
             if (tenancy()->initialized) {
                 tenancy()->end();
             }
 
+            // Filament's navigation, built once per instance for the signed-in
+            // user: kept, every page shows the first request's entries and badges.
             $this->app->forgetInstance(NavigationManager::class);
+            // Scoped up to Filament 5.9 (kept, the menu marked the first page as
+            // the current one); a plain binding since 5.10, where this does nothing.
             $this->app->forgetInstance('originalRequest');
+            // The application's own scoped per-request caches, for example:
+            // $this->app->forgetInstance(BadgeCounts::class);
 
             foreach ($this->uploadedTempFiles as $path) {
                 if (is_file($path)) {
@@ -249,14 +262,25 @@ abstract class BrowserTestCase extends TestCase
 
     protected function tearDown(): void
     {
-        if (tenancy()->initialized) {
-            tenancy()->end();
+        try {
+            // PHPUnit tears down also when the boot refused. The global
+            // container then holds the refused application, and the cleanup
+            // below would delete the tenants its configuration names.
+            TestApplications::assertApproved(app());
+
+            if (tenancy()->initialized) {
+                tenancy()->end();
+            }
+
+            // Provisioned tenant databases live outside the test transaction.
+            Tenant::query()->get()->each->delete();
+        } finally {
+            // Laravel's own teardown, also when the cleanup refused or failed:
+            // after an approved boot it rolls back the transaction and flushes
+            // the application; after a refused one ($this->app is null) it only
+            // removes the error handlers that boot installed and resets statics.
+            parent::tearDown();
         }
-
-        // Provisioned tenant databases live outside the test transaction.
-        Tenant::query()->get()->each->delete();
-
-        parent::tearDown();
     }
 
     /**
@@ -388,7 +412,7 @@ abstract class BrowserTestCase extends TestCase
 }
 ```
 
-Without stancl/tenancy, drop the tenancy lines, the base-domain switch and the tenant cleanup; keep the session, guard, URL-origin and navigation resets, the load guard and the upload handling.
+Without stancl/tenancy, drop the tenancy lines, the base-domain switch and the tenant cleanup, and with it the `tearDown()` override (keep `assertApproved()` and the `finally` in front of any other cleanup that deletes databases or files). Keep the `TestApplications::approve()` call: this class builds its own application, so the check in `TestCase::createApplication()` never runs for browser tests, and without a `tenancy` configuration it checks only the environment and the database names. Keep the session, guard, URL-origin and navigation resets, the load guard and the upload handling.
 
 The load guard makes every step wait for a fully loaded page, as a user sees it; `load` fires after Livewire has started. Without it, a suite passes on a fast machine and fails at random on slower CI runners: the first field filled after a page change comes up empty ("Please fill out this field" on submit), or a click opens nothing. It also holds what Filament binds after `load`, from the moment it is added: every `wire:model` field read-only (selects and checkboxes disabled) until it carries Alpine's `_x_model`, and every `x-load` element `aria-disabled` until it carries `_x_dataStack`. Filament starts such components (toggle buttons, the password reveal, tabs, the wizard, builders, selects, pickers, editors) only once their script has arrived: a value typed before is dropped when the binding starts, seen as a password field emptied while the other fields kept theirs, and a click on a single-choice toggle option does nothing, its button having no `wire:model`. Playwright counts an `aria-disabled` ancestor in its enabled and editable checks, so it waits for the component. The guard marks elements from a `MutationObserver`, whose callback runs right after the insertion and before Playwright's next command; a poll every 50 ms let Playwright fill a window's new password field before the guard saw it. Each element is held for ten seconds at most from when it was added, so a window opened late in a test is covered too. Hiding the page until then instead stalls Filament's upload field, which defers its own set-up while an ancestor is hidden and resumes only on a resize. It needs the layout's `<head>` tag written without attributes, as Filament's is.
 

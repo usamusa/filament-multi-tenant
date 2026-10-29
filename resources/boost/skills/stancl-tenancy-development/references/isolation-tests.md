@@ -24,9 +24,15 @@ function makeTenant(string $subdomain = 'acme'): Tenant
     return $tenant;
 }
 
-/** Delete every tenant created in this test (drops their databases). */
+/**
+ * Delete every tenant created in this test (drops their databases), only
+ * through an application a test boot accepted: afterEach runs after a refused
+ * boot too (see "Test databases on a shared server").
+ */
 function deleteAllTenants(): void
 {
+    TestApplications::assertApproved(app());
+
     Tenant::query()->get()->each->delete();
 }
 ```
@@ -115,6 +121,21 @@ it('keeps one tenant\'s cache entries invisible to another', function () {
 
     expect($alpha->run(fn () => Cache::get('shared-key')))->toBe('alpha')
         ->and($bravo->run(fn () => Cache::get('shared-key')))->toBe('bravo');
+});
+
+it('keeps memoized cache reads per tenant', function () {
+    config(['cache.default' => 'database']);
+    $alpha = makeTenant('alpha');
+    $bravo = makeTenant('bravo');
+
+    $alpha->run(fn () => Cache::put('shared-key', 'alpha', 60));
+    $bravo->run(fn () => Cache::put('shared-key', 'bravo', 60));
+
+    // Cache::memo() is scoped per store: without the bootstrapper forgetting it,
+    // bravo reads alpha's value through the memo alpha resolved first.
+    expect($alpha->run(fn () => Cache::memo()->get('shared-key')))->toBe('alpha')
+        ->and($bravo->run(fn () => Cache::memo()->get('shared-key')))->toBe('bravo')
+        ->and(Cache::memo()->get('shared-key'))->toBeNull();
 });
 
 it('separates tenant entries from the central cache', function () {
@@ -262,7 +283,13 @@ A permission denial inside a database (for example an `UPDATE` on an append-only
 <env name="TENANT_BASE_DOMAIN" value="myapp.test"/>
 <env name="DB_DATABASE" value="myapp_central_test"/>
 <env name="TENANT_DB_PREFIX" value="testing_tenant_"/>
+<!-- A cached configuration (php artisan optimize, config:cache) would replace every value above. -->
+<env name="APP_CONFIG_CACHE" value="bootstrap/cache/config.testing.php"/>
+<env name="APP_ROUTES_CACHE" value="bootstrap/cache/routes.testing.php"/>
+<env name="APP_EVENTS_CACHE" value="bootstrap/cache/events.testing.php"/>
 ```
+
+Laravel loads a configuration cache in tests too: `bootstrap/cache/config.php`, unless `APP_CONFIG_CACHE` names another file. The test application then ignores phpunit.xml's `<env>` values and `.env.testing` and runs on the development databases. `php artisan optimize` also caches routes and events, which test boots load as well (routes with the development domains), so the three pinned paths keep a developer's caches out of the tests. Package caches, such as Filament's component cache under `bootstrap/cache/filament`, still need `php artisan optimize:clear`. A variable exported in the shell also beats phpunit.xml, even with `force="true"`, and a connection's `url` (`DB_URL` in `.env`) overrides its `database` key: check the configuration at every boot as well.
 
 Parallel runs give each process its own central database, so tenant keys restart at 1 in every process while tenant database names are server-wide. Add a per-process prefix in the base test case:
 
@@ -279,7 +306,99 @@ protected function setUp(): void
 }
 ```
 
-Have the suite refuse database names that don't look like test databases before it creates or drops anything, and drop what it created when the owning process exits (in a parallel run, the main process).
+Refuse anything but the test configuration at every boot, in every process, and let a cleanup delete tenants only through an application that check accepted. PHPUnit runs `tearDown()`, and with it Pest's `afterEach()`, also when the boot threw; `$this->app` is null then, but `app()`, the facades, `tenancy()` and Eloquent still reach the refused application, so an unguarded `deleteAllTenants()` deletes the tenants its configuration names (with a cached development configuration, the development tenants and their databases). The check belongs in `createApplication()`, right after the bootstrap: `RefreshDatabase` runs `migrate:fresh` during `setUp()`, before any later check. Don't check the names again at cleanup: a parallel worker's central database becomes `<name>_test_<token>` after the boot, and a test may switch the environment.
+
+`tests/Support/TestApplications.php`:
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Support;
+
+use Illuminate\Foundation\Application;
+use Illuminate\Support\ConfigurationUrlParser;
+use RuntimeException;
+use WeakMap;
+
+/** The applications that booted on the test configuration: a cleanup acts only through one of them. */
+final class TestApplications
+{
+    /** @var WeakMap<Application, true>|null keyed by the object: an id could be reused by a later one */
+    private static ?WeakMap $approved = null;
+
+    /** Right after the bootstrap, before RefreshDatabase migrates anything. */
+    public static function approve(Application $app): void
+    {
+        $config = $app['config'];
+        $problems = [];
+
+        if ($app->environment() !== 'testing') {
+            $problems[] = "the environment is \"{$app->environment()}\"";
+        }
+
+        // The connection RefreshDatabase migrates and the one the tenants live on (central models),
+        // each as Laravel connects to it: a connection's url overrides its database key.
+        $connections = array_filter(array_unique([
+            $config->get('database.default'),
+            $config->get('tenancy.database.central_connection'),
+        ]));
+
+        foreach ($connections as $connection) {
+            $database = (string) ((new ConfigurationUrlParser)->parseConfiguration(
+                (array) $config->get("database.connections.{$connection}"),
+            )['database'] ?? '');
+
+            // Under WithCachedConfig a parallel worker boots on the name its first test switched to.
+            if (preg_match('/_test(_test_\d+)?$/', $database) !== 1) {
+                $problems[] = "the database \"{$database}\" of the connection \"{$connection}\" does not end in _test";
+            }
+        }
+
+        // Without stancl/tenancy there is no tenant prefix to check.
+        $prefix = (string) $config->get('tenancy.database.prefix');
+
+        if ($config->has('tenancy') && ! str_starts_with($prefix, 'testing_')) {
+            $problems[] = "the tenant database prefix \"{$prefix}\" does not start with testing_";
+        }
+
+        if ($problems !== []) {
+            // configurationIsCached() is also true under WithCachedConfig, which reads no file.
+            throw new RuntimeException('Refusing the test configuration: '.implode('; ', $problems)
+                .(is_file($app->getCachedConfigPath()) ? '. The configuration is cached: run php artisan optimize:clear.' : '. Check phpunit.xml.'));
+        }
+
+        self::$approved ??= new WeakMap;
+        self::$approved[$app] = true;
+    }
+
+    /** First thing in every cleanup that deletes tenants, databases or files. */
+    public static function assertApproved(Application $app): void
+    {
+        if (! isset(self::$approved[$app])) {
+            throw new RuntimeException('Refusing to clean up through an application no test boot accepted.');
+        }
+    }
+}
+```
+
+`tests/TestCase.php` (a browser base test case that builds its own application calls `approve()` the same way):
+
+```php
+public function createApplication(): Application
+{
+    $app = parent::createApplication();
+
+    TestApplications::approve($app);
+
+    return $app;
+}
+```
+
+A cleanup in a `tearDown()` override checks first and reaches Laravel's own teardown in a `finally`, so it still runs when the cleanup refuses or fails: it rolls back and flushes an approved application, and after a refused boot removes the error handlers that boot installed (`filament-browser-testing` skill, `references/browser-test-case.md`).
+
+Drop what the run created when the owning process exits (in a parallel run, the main process): register that drop in the boot check, after it passed and with the names it checked, so a refused boot registers none.
 
 ## Browser tests
 

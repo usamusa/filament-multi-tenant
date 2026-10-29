@@ -16,7 +16,7 @@
 
 - The name is `tenancy.database.prefix` + tenant key + `tenancy.database.suffix`, or whatever `DatabaseConfig::generateDatabaseNamesUsing(fn (Tenant $tenant) => …)` returns. `Tenant::create(['tenancy_db_name' => 'acme'])` sets it explicitly.
 - `CreateDatabase` stores the name on the tenant as `tenancy_db_name`. From then on the stored name wins: changing the prefix later affects only new tenants.
-- Make the prefix environment-specific (`'prefix' => env('TENANT_DB_PREFIX', 'tenant_')`) and pin a test-only prefix in `phpunit.xml`, so a test run that drops its tenants can never drop dev databases on the same server.
+- Make the prefix environment-specific (`'prefix' => env('TENANT_DB_PREFIX', 'tenant_')`) and pin a test-only prefix in `phpunit.xml`, so a test run that drops its tenants doesn't drop dev databases on the same server. A cached configuration replaces phpunit.xml's values in tests, so pin `APP_CONFIG_CACHE` there too and check the names at boot (`isolation-tests.md`, "Test databases on a shared server").
 
 ## The `tenant` connection and templates
 

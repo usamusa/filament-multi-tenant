@@ -82,7 +82,8 @@ use Stancl\Tenancy\Contracts\Tenant;
  * Scopes the cache to the current tenant by key prefix. On every switch the
  * resolved stores are forgotten and rebuilt with the new prefix, together with
  * everything that holds a store instance: the cache.store singleton, the
- * RateLimiter (lockouts must not count across tenants) and spatie's registrar.
+ * memoized stores of Cache::memo(), the RateLimiter (lockouts must not count
+ * across tenants) and spatie's registrar.
  */
 final class CachePrefixBootstrapper implements TenancyBootstrapper
 {
@@ -113,7 +114,15 @@ final class CachePrefixBootstrapper implements TenancyBootstrapper
 
         /** @var CacheManager $cache */
         $cache = $this->app->make('cache');
-        $cache->forgetDriver(array_keys((array) config('cache.stores', [])));
+        $stores = array_keys((array) config('cache.stores', []));
+        $cache->forgetDriver($stores);
+
+        // Cache::memo() is a scoped binding per store around the repository it
+        // first resolved, prefix included: kept, it reads and writes the
+        // previous tenant's entries.
+        foreach ($stores as $store) {
+            $this->app->forgetInstance("cache.__memoized:{$store}");
+        }
 
         $this->app->forgetInstance('cache.store');
         $this->app->forgetInstance(RateLimiter::class);

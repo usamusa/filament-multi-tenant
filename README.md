@@ -10,7 +10,7 @@ It is a Composer package without runtime code. [Laravel Boost](https://github.co
 
 | File | Covers | Rendered when the project has |
 | --- | --- | --- |
-| `filament.blade.php` | Authorization (responses vs `can*()`, guards on pages), forms, sanitizing, labels | `filament/filament ^5.0` |
+| `filament.blade.php` | Authorization (responses vs `can*()`, guards on pages), forms, sanitizing, labels, themes and phones, navigation | `filament/filament ^5.0` |
 | `livewire.blade.php` | APP_KEY-hashed update endpoint | `livewire/livewire ^4.0` |
 | `tenancy.blade.php` | Tenant-domain requests, state that must not cross tenants, databases and tests | `stancl/tenancy ^3.0` |
 | `laravel.blade.php` | Time zones; spatie cache after seeding | always |
