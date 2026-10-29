@@ -17,6 +17,7 @@ use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Bootstrap\LoadConfiguration;
 use Illuminate\Foundation\Http\Events\RequestHandled;
+use Illuminate\Foundation\Vite;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Routing\Events\Routing;
@@ -91,6 +92,13 @@ abstract class BrowserTestCase extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        // The built assets, always, as on CI (npm run build first). While a
+        // developer runs `npm run dev`, Vite's hot file would send every page
+        // to the dev server's origin. withVite() undoes a withoutVite() from
+        // the base test case, whose stand-in would ignore the hot file.
+        $this->withVite();
+        $this->app->make(Vite::class)->useHotFile(storage_path('framework/testing/vite.hot'));
 
         $this->app['events']->listen(Routing::class, function (Routing $event): void {
             // The plugin pins generated URLs to http://127.0.0.1:<port>. A tenant

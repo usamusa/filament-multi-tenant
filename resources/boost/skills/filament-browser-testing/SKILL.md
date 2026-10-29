@@ -11,10 +11,19 @@ A browser test drives the real UI in Chromium against an in-process server that 
 
 ## Setup (once per project)
 
-1. `composer require pestphp/pest-plugin-browser --dev`, then `npm install playwright@latest` and `npx playwright install`. Add `tests/Browser/Screenshots` and `tests/Browser/Traces` to `.gitignore`.
+1. `composer require pestphp/pest-plugin-browser --dev`, then `npm install playwright@latest` and `npx playwright install`. Add `tests/Browser/Screenshots` and `tests/Browser/Traces` to the root `.gitignore` (not a `.gitignore` inside them). Run `npm run build` before browser runs, locally and in CI: the base test case always loads the build.
 2. `tests/Pest.php`:
 
 ```php
+// The plugin removes its output folders with a silenced rmdir() when a run
+// loads a browser test, without checking they exist; PHPUnit counts each
+// such warning. Create them first: Pest loads this file before the tests.
+foreach (['Traces', 'Screenshots/Sliders', 'Screenshots/ImageDiffView'] as $folder) {
+    if (! is_dir(__DIR__.'/Browser/'.$folder)) {
+        mkdir(__DIR__.'/Browser/'.$folder, 0755, true);
+    }
+}
+
 pest()->extend(BrowserTestCase::class)
     ->use(RefreshDatabase::class)
     ->in('Browser');
