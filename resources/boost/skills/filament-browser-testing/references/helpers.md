@@ -238,7 +238,7 @@ waitUntil($page, "(() => { const img = document.querySelector('.fi-in-entry img'
 
 Keep fixtures small: a few bytes of a real format are enough for the type checks (a one-pixel PNG, a minimal PDF).
 
-Reading a value from a page just opened: the browser plugin can end a navigation on the late `load` event of the page being left, and `script()` returns the error text, a string, when a navigation replaces the page while it runs. Mark the page being left, then read until a wholly loaded page without the mark answers; the value travels wrapped, so `null` or a string the page returns is told apart from that error text. The page is opened with one navigation (`navigateOnce()`, below): such a read usually runs over many pages in turn, and one page slower than a second would end `navigate()`'s attempts.
+Reading a value from a page just opened, up to pest-plugin-browser 5.1: the plugin could end a navigation on the late `load` event of the page being left, and `script()` returns the error text, a string, when a navigation replaces the page while it runs. Mark the page being left, then read until a wholly loaded page without the mark answers; the value travels wrapped, so `null` or a string the page returns is told apart from that error text. Since 5.2 `navigate()` and `goto()` return once their own page has loaded, so a plain `script()` after them reads the new page; the helper still serves where the page changes without a navigation the test waits for (a click, a Livewire redirect) and the path stays the same.
 
 ```php
 /**
@@ -270,14 +270,14 @@ function readAfterNavigation(mixed $page, string $url, string $path, string $exp
 $violations = readAfterNavigation($page, $url, '/reports', 'window.__cspViolations || []');
 ```
 
-Opening a page that takes longer than a second to load: the plugin runs `navigate()` like an assertion, in attempts of one second, and asks for the page again after each. A slow page (a heavy editor, a whole year's calendar, any page on a slow CI runner) then fails with "Timeout 1000ms exceeded", the screenshot blank while the load guard still hides the page, or with "Navigation to … is interrupted by another navigation". Open it with one navigation that waits the browser timeout; the load guard then holds the next step until the page has loaded. A check that visits page after page (every list of a panel) opens each one this way. The navigation's wait ends on the first `load` event of any frame — the plugin's client matches the event, not the page —, so follow it with `waitForPage()`, which polls the page itself. `waitForEvent('load')` is no substitute: it never reaches Playwright. Playwright's own timeout message names no page, so the helper adds the URL.
+Opening a page with one navigation that names the URL in a failure: Playwright's own timeout message ("Timeout 15000ms exceeded.") names no page, and a check that visits page after page (every list of a panel) needs to know which one failed. Up to pest-plugin-browser 5.1 the helper had a second reason: the plugin ran `navigate()` like an assertion, in attempts of one second, asking for the page again after each, so a slow page (a heavy editor, a whole year's calendar, any page on a slow CI runner) failed with "Timeout 1000ms exceeded" or "Navigation to … is interrupted by another navigation"; the helper then called `$page->page()->goto($url)`, whose wait ended on the first `load` event of any frame. Since 5.2 `navigate()` is one navigation that waits the browser timeout for its own page, so the helper calls it and adds the plugin's screenshot and logs to a failure. Follow it with `waitForPage()`, which checks the path and that Livewire has started. `waitForEvent('load')` is no substitute: it never reaches Playwright.
 
 ```php
-/** Opens $url with one navigation that waits the browser timeout for the page to load. */
+/** Opens $url with one navigation that waits the browser timeout, and names the URL in a failure. */
 function navigateOnce(mixed $page, string $url): mixed
 {
     try {
-        $page->page()->goto($url);
+        $page->navigate($url); // up to pest-plugin-browser 5.1: $page->page()->goto($url)
     } catch (\PHPUnit\Framework\ExpectationFailedException $e) {
         throw new \PHPUnit\Framework\ExpectationFailedException("{$url}: {$e->getMessage()}", $e->getComparisonFailure(), $e);
     }

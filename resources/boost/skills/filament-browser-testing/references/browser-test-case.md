@@ -154,9 +154,10 @@ abstract class BrowserTestCase extends TestCase
 
         // Playwright acts as soon as an element exists, and text assertions pass
         // while a page is still loading: a field filled before Livewire starts
-        // is emptied when it starts, a button clicked then does nothing, and the
-        // plugin ends navigate() on any page's `load` event, also the late one of
-        // the page being left. Show the test each page only once it has loaded.
+        // is emptied when it starts, a button clicked then does nothing, and up
+        // to pest-plugin-browser 5.1 the plugin ended navigate() on any page's
+        // `load` event, also the late one of the page being left. Show the test
+        // each page only once it has loaded.
         $this->app['events']->listen(RequestHandled::class, function (RequestHandled $event): void {
             $content = $event->response->getContent();
 
@@ -178,9 +179,11 @@ abstract class BrowserTestCase extends TestCase
 
         // Tenancy initialized by one request must not leak into the next one
         // (or into a central panel), nor a scoped binding that keeps what one
-        // request read: nothing in a test resets scoped instances. Forget them
-        // by name, never all of them with forgetScopedInstances(): Filament's
-        // managers behind facades and the test's doubles live there too.
+        // request read. pest-plugin-browser up to 5.1 resets no scoped instance;
+        // 5.2 forgets those the request itself resolved, not those resolved
+        // before it (at boot, in setUp(), by test code). Forget them by name,
+        // never all of them with forgetScopedInstances(): Filament's managers
+        // behind facades and the test's doubles live there too.
         $this->app->terminating(function (): void {
             if (tenancy()->initialized) {
                 tenancy()->end();
@@ -422,8 +425,8 @@ abstract class BrowserTestCase extends TestCase
 
 Without stancl/tenancy, drop the tenancy lines, the base-domain switch and the tenant cleanup, and with it the `tearDown()` override (keep `assertApproved()` and the `finally` in front of any other cleanup that deletes databases or files). Keep the `TestApplications::approve()` call: this class builds its own application, so the check in `TestCase::createApplication()` never runs for browser tests, and without a `tenancy` configuration it checks only the environment and the database names. Keep the session, guard, URL-origin and navigation resets, the load guard and the upload handling.
 
-The load guard makes every step wait for a fully loaded page, as a user sees it; `load` fires after Livewire has started. Without it, a suite passes on a fast machine and fails at random on slower CI runners: the first field filled after a page change comes up empty ("Please fill out this field" on submit), or a click opens nothing. It also holds what Filament binds after `load`, from the moment it is added: every `wire:model` field read-only (selects and checkboxes disabled) until it carries Alpine's `_x_model`, and every `x-load` element `aria-disabled` until it carries `_x_dataStack`. Filament starts such components (toggle buttons, the password reveal, tabs, the wizard, builders, selects, pickers, editors) only once their script has arrived: a value typed before is dropped when the binding starts, seen as a password field emptied while the other fields kept theirs, and a click on a single-choice toggle option does nothing, its button having no `wire:model`. Playwright counts an `aria-disabled` ancestor in its enabled and editable checks, so it waits for the component. The guard marks elements from a `MutationObserver`, whose callback runs right after the insertion and before Playwright's next command; a poll every 50 ms let Playwright fill a window's new password field before the guard saw it. Each element is held for ten seconds at most from when it was added, so a window opened late in a test is covered too. Hiding the page until then instead stalls Filament's upload field, which defers its own set-up while an ancestor is hidden and resumes only on a resize. It needs the layout's `<head>` tag written without attributes, as Filament's is.
+The load guard makes every step wait for a fully loaded page, as a user sees it; `load` fires after Livewire has started. Without it, a suite passes on a fast machine and fails at random on slower CI runners: the first field filled after a page change comes up empty ("Please fill out this field" on submit), or a click opens nothing. It also holds what Filament binds after `load`, from the moment it is added: every `wire:model` field read-only (selects and checkboxes disabled) until it carries Alpine's `_x_model`, and every `x-load` element `aria-disabled` until it carries `_x_dataStack`. Filament starts such components (toggle buttons, the password reveal, tabs, the wizard, builders, selects, pickers, editors) only once their script has arrived: a value typed before is dropped when the binding starts, seen as a password field emptied while the other fields kept theirs, and a click on an optional single-choice toggle option does nothing, its button having no `wire:model` (a required one, since Filament 5.11, is a `wire:model` radio the guard holds like any field). Playwright counts an `aria-disabled` ancestor in its enabled and editable checks, so it waits for the component. The guard marks elements from a `MutationObserver`, whose callback runs right after the insertion and before Playwright's next command; a poll every 50 ms let Playwright fill a window's new password field before the guard saw it. Each element is held for ten seconds at most from when it was added, so a window opened late in a test is covered too. Hiding the page until then instead stalls Filament's upload field, which defers its own set-up while an ancestor is hidden and resumes only on a resize. It needs the layout's `<head>` tag written without attributes, as Filament's is.
 
-`delayLateComponents()` reproduces a slow runner on a fast machine, where these races are won by luck: async-alpine starts each `x-load` component through `Alpine.initTree()`, and the injected script delays that call. With `$this->delayLateComponents(1500)` before signing in, a toggle option clicked under a guard that holds only `wire:model` fields stays unchosen; under this guard the click waits and lands. Keep such a test next to the base test case, so the guard cannot quietly lose a hole again.
+`delayLateComponents()` reproduces a slow runner on a fast machine, where these races are won by luck: async-alpine starts each `x-load` component through `Alpine.initTree()`, and the injected script delays that call. With `$this->delayLateComponents(1500)` before signing in, an optional toggle option clicked under a guard that holds only `wire:model` fields stays unchosen; under this guard the click waits and lands. Keep such a test next to the base test case, so the guard cannot quietly lose a hole again.
 
-The multipart parser covers what Livewire's upload endpoint and plain HTML forms send (single and `[]` fields, quoted or bare boundaries). It does not handle nested names such as `a[b][c]`. pest-plugin-browser 5.1 parses the parts itself but keeps a nested name such as `files[]` flat, so the parser stays and replaces what the plugin found; an upload test without it fails before reaching your code.
+The multipart parser covers what Livewire's upload endpoint and plain HTML forms send (single and `[]` fields, quoted or bare boundaries). It does not handle nested names such as `a[b][c]`. pest-plugin-browser 5.1 and 5.2 parse the parts themselves but keep a nested name such as `files[]` flat, so the parser stays and replaces what the plugin found; an upload test without it fails before reaching your code.
