@@ -314,6 +314,15 @@ abstract class BrowserTestCase extends TestCase
      * A MutationObserver marks each element as it is added, before
      * Playwright's next command can reach it; a poll leaves a gap in which a
      * window's new field is filled. Not by hiding the page longer: Filament's
+     *
+     * And tells whether the page's own requests are through
+     * (`window.__livewireSettled()`, for waitForPageToSettle()): Livewire
+     * started, no request in flight, none in the last 100 ms, every lazy
+     * component in view loaded — Livewire 4 loads one through x-intersect,
+     * so its request leaves only after `load`. Answered after the test
+     * changed what the server answers (the clock moved, a sign-out), a
+     * redirect among them makes Livewire replace the page, which aborts a
+     * navigation the test started meanwhile (net::ERR_ABORTED).
      * upload field defers its own set-up while hidden and never resumes.
      */
     private const LOAD_GUARD = <<<'JS'
@@ -394,6 +403,31 @@ abstract class BrowserTestCase extends TestCase
                     for (var j = 0; j < records[i].addedNodes.length; j++) { holdWithin(records[i].addedNodes[j]); }
                 }
             }).observe(document, { childList: true, subtree: true });
+
+            var requests = 0;
+            var lastActivity = Date.now();
+            var started = false;
+            document.addEventListener('livewire:initialized', function () { started = true; lastActivity = Date.now(); });
+            document.addEventListener('livewire:init', function () {
+                window.Livewire.interceptRequest(function (hooks) {
+                    var open = false;
+                    var settle = function () { if (open) { open = false; requests--; lastActivity = Date.now(); } };
+                    hooks.onSend(function () { open = true; requests++; lastActivity = Date.now(); });
+                    hooks.onFinish(settle);
+                    hooks.onCancel(settle);
+                    hooks.onFailure(settle);
+                });
+            });
+            var inView = function (element) {
+                var box = element.getBoundingClientRect();
+                return box.width > 0 && box.height > 0 && box.bottom > 0 && box.right > 0 && box.top < window.innerHeight && box.left < window.innerWidth;
+            };
+            window.__livewireSettled = function () {
+                if (! started || requests > 0 || Date.now() - lastActivity < 100) { return false; }
+                return window.Livewire.all().every(function (component) {
+                    return component.snapshot.memo.lazyLoaded !== false || ! inView(component.el);
+                });
+            };
             holdWithin(root);
         })();
         JS;

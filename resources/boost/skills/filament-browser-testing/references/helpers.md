@@ -296,6 +296,22 @@ waitForPage($page, '/workflows/'.$workflow->id)
     ->click('Publish');
 ```
 
+Waiting until the page's own requests are through, before the test changes what the server would answer them (the clock moved past the session's lifetime, a sign-out, a deactivation): a lazy component's load (Filament's bell on every panel page; since Livewire 4 it loads through `x-intersect`, so the request leaves only once the IntersectionObserver has fired, after `load`), the notification pull, a poll. Answered after such a change, one comes back as a redirect, which Livewire follows by replacing the page, and that aborts a navigation the test started meanwhile (`net::ERR_ABORTED`, timing-dependent). The condition is the base test case's page script (`window.__livewireSettled()`, references/browser-test-case.md): Livewire started, no request in flight, none in the last 100 ms, every lazy component in view loaded. About 300 ms per call, so it stays out of `waitForPage()`, which every sign-in and every page of a sweep runs.
+
+```php
+/** Waits like waitForPage() and until the page's own requests are through. */
+function waitForPageToSettle(mixed $page, string $path): mixed
+{
+    return $page->assertScript('location.pathname === '.json_encode($path, JSON_UNESCAPED_SLASHES).' && document.readyState === "complete" && window.Livewire !== undefined && window.__livewireSettled()');
+}
+
+$page = signIn($tenant, $user->email)->navigate(tenantUrl($tenant, '/profile'));
+waitForPageToSettle($page, '/profile');
+$this->travel(2)->hours(); // past the session's absolute lifetime
+$page->navigate(tenantUrl($tenant, '/profile'));
+waitForPage($page, '/login')->assertSee('Your sign-in has expired');
+```
+
 Reading a Filament notification in a feature test: since Filament 5.10 notifications go through `NotificationMailbox`, not the session, and `assertNotified()` compares the title only. Flush the pending notifications, pull them and push them back for whoever reads them next. This reads notifications without a batch: those of `Livewire::test()`, which runs no middleware, and of a request that is no Livewire response. Since 5.10.3 a Livewire response through the kernel publishes its notifications under a batch (its `X-Filament-Notifications` header): pass that to `pull()`.
 
 ```php
