@@ -101,6 +101,42 @@ function rowActionsOf(string $name): string
 }
 
 /**
+ * Opens a relation manager tab of a record's page by its label and waits
+ * until what it shows has loaded. Relation managers are lazy by default, and
+ * Livewire 4 loads a lazy component only once its placeholder is in view
+ * (x-intersect); Playwright scrolls to the tab it clicks, never to rows that
+ * don't exist yet, so on a tall page the placeholder below the tab can stay
+ * out of view and a click on a row times out. The click is a round trip:
+ * the tab's aria-selected and fi-active are set by Alpine at once, but only
+ * the server fills the tab's panel (the element its aria-controls names).
+ * Until the panel's components have loaded, each check brings the first one
+ * still waiting into view.
+ */
+function openRelationManagerTab(mixed $page, string $label): mixed
+{
+    $page->click('button.fi-tabs-item:has-text("'.$label.'")');
+
+    $labelJs = json_encode($label, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
+
+    return waitUntil($page, <<<JS
+        (() => {
+            const tab = [...document.querySelectorAll('button.fi-tabs-item')]
+                .find((button) => button.querySelector('.fi-tabs-item-label')?.textContent.trim() === {$labelJs});
+            const panel = tab && document.getElementById(tab.getAttribute('aria-controls'));
+            if (! panel) { return false; }
+            const shown = window.Livewire.all().filter((component) => panel.contains(component.el));
+            const waiting = shown.find((component) => component.snapshot.memo.lazyLoaded === false);
+            if (waiting) { waiting.el.scrollIntoView({ block: 'center', behavior: 'instant' }); return false; }
+            return shown.length > 0;
+        })()
+    JS);
+}
+
+// openRelationManagerTab($page->navigate($recordUrl), 'Invoices')
+//     ->click(rowActionsOf('INV-0042'))
+//     ->click('.fi-dropdown-list-item:visible:has-text("Approve")');
+
+/**
  * A field of a Builder block, by the block's position (1 = the first block)
  * and the field's name. `nth=` counts only the blocks; `:nth-child()` would
  * also count the controls for inserting a block in between. Nested blocks
